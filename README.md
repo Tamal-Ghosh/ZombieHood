@@ -1,6 +1,17 @@
-# ZombieHood foundation
+# ZombieHood
 
-Install: python -m pip install -r requirements.txt
-Run: python zombiehood/main.py
-This initial window supports resize/close/Escape. Game features arrive in reviewed PRs.
-Shared Survivor model and contracts are the common baseline.
+Initial runnable foundation for the ZombieHood team project.
+
+Install dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Run:
+
+```powershell
+python zombiehood/main.py
+```
+
+The initial window supports resizing, closing and Escape. Game features will arrive through reviewed pull requests. The shared Survivor model is included in the foundation.
