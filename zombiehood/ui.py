@@ -1,6 +1,6 @@
-# GLOBAL COMMIT: 24
+# GLOBAL COMMIT: 26
 # OWNER: Nijhum
-# COMMIT MESSAGE: Render board objects pawns and combat effects
+# COMMIT MESSAGE: Add menus overlays and complete UI drawing
 # REPOSITORY DESTINATION: zombiehood/ui.py
 # Cumulative snapshot: replace destination contents with this file.
 # Partial stage; follow GLOBAL_SERIAL.md before running.
@@ -790,12 +790,236 @@ class Renderer:
                 self.text(fx["text"], 14, fx["color"], (x, y), "center")
 
     # ------------------------------------------------------------ Header & Cards matching HTML
+    def draw_header(self, game):
+        """Top banner matching .title and .motto in HTML."""
+        cx = W // 2
 
+        # Title Box
+        title_w, title_h = 520, 82
+        title_box = pygame.Rect(cx - title_w // 2, 6, title_w, title_h)
+        self.panel(title_box, bg=PANEL_BG, border=PANEL_BORDER, width=3, radius=8)
 
+        # Title Text with 3D drop shadow
+        self.text("ZombieHood", 64, (90, 13, 16), (cx + 2, title_box.centery + 2), "center", title=True)
+        self.text("ZombieHood", 64, RED, (cx, title_box.centery), "center", title=True)
 
+        # Motto
+        self.text("THE LAST ALIVE", 22, (0, 0, 0), (cx + 1, 103), "center", title=True)
+        self.text("THE LAST ALIVE", 22, (214, 220, 207), (cx, 102), "center", title=True)
 
+        # Top-right tiny match info strip
+        if game.state:
+            st = game.state
+            diff_label = getattr(self.cfg, "difficulty", "hard").upper()
+            mode = "AI Battle" if game.human_idx is None else "Control: %s" % st.survivors[game.human_idx].name
+            self.text("R%d/%d | %s (%dx%d) | %s | %dms" % (st.round + 1, self.cfg.max_rounds, diff_label, self.cfg.rows, self.cfg.cols, mode, game.delay_ms),
+                      15, DIM, (W - 16, 10), "topright", bold=False)
 
+    def draw_cards(self, game, t):
+        for i, sv in enumerate(game.state.survivors):
+            rect = pygame.Rect(24, 150 + i * 116, 240, 106)
+            active = game.state.turn == sv.idx and sv.alive
+            self.panel(rect, border=sv.color if active else PANEL_BORDER, width=3 if active else 2)
+            self.sprite_soldier(pygame.Rect(rect.x + 10, rect.y + 10, 40, 40), sv.color, is_female=sv.female, dead=not sv.alive)
+            self.text(sv.name, 22, sv.color, (rect.x + 60, rect.y + 8))
+            for h in range(sv.max_lives):
+                self.sprite_heart(pygame.Rect(rect.x + 60 + h * 22, rect.y + 36, 19, 19), shine=h < sv.lives)
+            self.text("Score %d   Kills %d" % (sv.score, sv.kills), 17, GOLD, (rect.x + 12, rect.y + 60))
+            status = "DEAD" if not sv.alive else ("ESCAPED" if sv.reached_goal else ("READY" if game.state.goal_unlocked_for(sv) else "LOCKED"))
+            self.text("Coins %d/%d" % (sv.coins, self.cfg.coins_to_kill), 16, INK, (rect.x + 12, rect.y + 83))
+            self.text(status, 14, GREEN if status == "READY" else sv.color, (rect.right - 10, rect.y + 84), "topright")
 
+    def button(self, label, action, rect, border_color=None):
+        mouse = getattr(self, "mouse_pos", pygame.mouse.get_pos())
+        hover = rect.collidepoint(mouse)
+        bg = (35, 50, 72) if hover else PANEL_BG
+        border = (120, 160, 210) if hover else (border_color or PANEL_BORDER)
+        pygame.draw.rect(self.screen, bg, rect, border_radius=6)
+        pygame.draw.rect(self.screen, border, rect, 2, border_radius=6)
+        self.text(label, 17, INK, rect.center, "center", bold=True)
+        self.buttons.append((rect, action))
 
+    def draw_bottom_bar(self, game):
+        x = W - 264
+        self.panel(pygame.Rect(x, 170, 240, 430), width=2)
+        self.text("EVENT LOG", 26, GOLD, (x + 16, 186), title=True)
+        y = 225
+        for line, color in reversed(game.log[-5:]):
+            words = str(line).split()
+            wrapped = ""
+            for word in words:
+                candidate = (wrapped + " " + word).strip()
+                if self.font(16).size(candidate)[0] > 208 and wrapped:
+                    self.text(wrapped, 16, color, (x + 16, y))
+                    y += 22
+                    wrapped = word
+                else:
+                    wrapped = candidate
+            self.text(wrapped, 16, color, (x + 16, y))
+            y += 32
+            if y > 560:
+                break
+        self.text("MATCH CONTROLS", 26, GOLD, (x + 16, 625), title=True)
+        labels = [("Resume [P]" if game.phase == Phase.PAUSED else "Pause [P]", "pause"),
+                  ("Restart [R]", "restart"), ("New Map [N]", "new"), ("Menu [M]", "menu")]
+        for i, (label, action) in enumerate(labels):
+            self.button(label, action, pygame.Rect(x, 660 + i * 52, 240, 42))
+        self.text("WASD / Arrows: move", 16, DIM, (x + 12, 880))
+        self.text("Space: shoot  |  Z: wait", 16, DIM, (x + 12, 902))
+
+        self.panel(pygame.Rect(24, 515, 240, 300), width=2)
+        self.text("SURVIVAL OBJECTIVE", 26, GOLD, (40, 535), title=True)
+        self.text("Collect %d coins to shoot" % self.cfg.coins_to_kill, 16, INK, (40, 575))
+        self.text("Kill %d zombie(s) to unlock" % self.cfg.kills_to_unlock, 16, INK, (40, 600))
+        self.text("Reach the exit alive", 16, GREEN, (40, 625))
+        self.text("LEADERBOARD", 26, GOLD, (40, 670), title=True)
+        for i, sv in enumerate(sorted(game.state.survivors, key=lambda s: s.score, reverse=True)):
+            self.text("%d. %s   %d pts" % (i + 1, sv.name, sv.score), 18, sv.color, (40, 710 + i * 28))
+
+    def dim(self, a=180):
+        s = pygame.Surface((W, H), pygame.SRCALPHA)
+        s.fill((0, 0, 0, a))
+        self.screen.blit(s, (0, 0))
+
+    def draw_menu(self):
+        self.dim(200)
+        box_w, box_h = 700, 520
+        box = pygame.Rect((W - box_w) // 2, (H - box_h) // 2, box_w, box_h)
+        self.panel(box, bg=PANEL_BG, border=PANEL_BORDER, width=3, radius=10)
+
+        cx = box.centerx
+        # Horror title using Creepster
+        self.text("ZombieHood", 68, (90, 13, 16), (cx + 3, box.y + 44), "center", title=True)
+        self.text("ZombieHood", 68, RED, (cx, box.y + 42), "center", title=True)
+
+        if self.menu_mode == "select_difficulty":
+            self.text("SELECT DIFFICULTY", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+            subtitle = "AI VS AI BATTLEFIELD SELECTION" if self.chosen_mode == "ai" else "CHOOSE YOUR SURVIVAL CHALLENGE"
+            self.text(subtitle, 16, GOLD, (cx, box.y + 138), "center", title=True)
+
+            diff_opts = [
+                ("🟢 Easy    - 10x10 Grid • 3 Lives • 10 Coins to Kill  [1]", "diff_easy", GREEN),
+                ("🟡 Medium  - 12x12 Grid • 2 Lives • 15 Coins to Kill  [2]", "diff_medium", GOLD),
+                ("🔴 Hard    - 15x15 Grid • 1 Life  • 20 Coins to Kill  [3]", "diff_hard", (255, 95, 95)),
+            ]
+            for i, (lab, act, col) in enumerate(diff_opts):
+                r = pygame.Rect(cx - 240, box.y + 185 + i * 62, 480, 48)
+                self.button(lab, act, r, border_color=col)
+
+            self.button("<- Back to Mode Select  [ESC]", "menu_main", pygame.Rect(cx - 150, box.y + 395, 300, 42))
+            self.text("Keys: 1 Easy   2 Medium   3 Hard   |   ESC / B Back",
+                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+
+        elif self.menu_mode == "select_human":
+            self.text("SELECT YOUR SURVIVOR", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+            grid_sz = 10 if self.chosen_diff == "easy" else (12 if self.chosen_diff == "medium" else 15)
+            self.text("DIFFICULTY: %s (%dx%d) • TAKE CONTROL OF A SURVIVOR" % (self.chosen_diff.upper(), grid_sz, grid_sz),
+                      16, GOLD, (cx, box.y + 138), "center", title=True)
+
+            survivors_info = [
+                ("Play as Tamal   (MCTS Agent)   [1]", "h0", (74, 163, 255)),
+                ("Play as Progga  (Fuzzy Logic)  [2]", "h1", (255, 123, 181)),
+                ("Play as Nijhum  (Minimax)      [3]", "h2", (255, 184, 74)),
+            ]
+            for i, (lab, act, col) in enumerate(survivors_info):
+                r = pygame.Rect(cx - 190, box.y + 195 + i * 58, 380, 46)
+                self.button(lab, act, r, border_color=col)
+
+            self.button("<- Back to Difficulty Select  [ESC]", "menu_diff", pygame.Rect(cx - 160, box.y + 395, 320, 42))
+            self.text("Keys: 1 Tamal   2 Progga   3 Nijhum   |   ESC / B Back",
+                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+
+        else:
+            self.text("THE LAST ALIVE", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+
+            # Enhanced, large, clear horror-style rules text
+            lines = [
+                ("3 DIFFICULTIES: EASY (10X10), MEDIUM (12X12), HARD (15X15)", GOLD),
+                ("GATHER REQUIRED COINS TO SHOOT ZOMBIES & UNLOCK GOAL", (255, 185, 80)),
+                ("ENTERING ADJACENT ZOMBIE CELL LOSES ALL COINS & 1 LIFE!", (255, 110, 110)),
+                ("KILL AT LEAST 1 ZOMBIE TO UNLOCK THE EXIT GOAL!", GREEN),
+            ]
+            for i, (ln, col) in enumerate(lines):
+                self.text(ln, 17, col, (cx, box.y + 138 + i * 28), "center", title=True)
+
+            # 2 Main Modes
+            opts = [
+                ("AI vs AI  (Watch Battle)  [SPACE]", "choose_diff_ai"),
+                ("AI vs Human  (Play Survivor)  [ENTER]", "choose_diff_human"),
+            ]
+            for i, (lab, act) in enumerate(opts):
+                self.button(lab, act, pygame.Rect(cx - 190, box.y + 276 + i * 62, 380, 48))
+
+            self.text("Select Mode with mouse or SPACE (AI vs AI) / ENTER (AI vs Human)  |  ESC Quit",
+                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+
+    def draw_pause(self):
+        self.dim(140)
+        bx = self.BX + self.board_w // 2
+        by = self.BY + self.board_h // 2
+        self.text("PAUSED", 62, INK, (bx, by - 20), "center", title=True)
+        self.text("press P to resume", 15, DIM, (bx, by + 34), "center", bold=False)
+
+    def draw_over(self, game):
+        self.dim(190)
+        o = game.outcome
+        box_w, box_h = 560, 380
+        box = pygame.Rect((W - box_w) // 2, (H - box_h) // 2, box_w, box_h)
+        col = RED if o["title"] == "DEFEAT" else (GOLD if "DRAW" in o["title"] else GREEN)
+        self.panel(box, bg=PANEL_BG, border=col, width=3, radius=10)
+
+        cx = box.centerx
+        # Horror title for Game Over / Defeat
+        self.text(o["title"], 50, col, (cx, box.y + 38), "center", title=True)
+
+        words, line = o["detail"].split(), ""
+        y = box.y + 86
+        for w in words:
+            if self.font(13, bold=False).size(line + w)[0] > box.width - 50:
+                self.text(line, 13, INK, (cx, y), "center", bold=False)
+                line, y = "", y + 20
+            line += w + " "
+        self.text(line, 13, INK, (cx, y), "center", bold=False)
+
+        self.text("FINAL STANDINGS", 12, DIM, (box.x + 36, y + 28), bold=True)
+        for i, sv in enumerate(o["ranking"]):
+            tag = "escaped" if sv.reached_goal else ("dead" if not sv.alive else "alive")
+            self.text("%d. %-7s %4d pts   coins %-2d   kills %d   (%s)" % (
+                i + 1, sv.name, sv.score, sv.coins, sv.kills, tag),
+                13, sv.color, (box.x + 36, y + 52 + i * 24), bold=True)
+
+        for i, (lab, act) in enumerate([("Restart [R]", "restart"), ("New Map [N]", "new"), ("Menu [M]", "menu")]):
+            self.button(lab, act, pygame.Rect(box.x + 24 + i * 174, box.bottom - 52, 160, 38))
 
     # ------------------------------------------------------------ main draw loop
+    def draw(self, game):
+        if game.cfg is not self.cfg:
+            self.set_config(game.cfg)
+        t = pygame.time.get_ticks()
+        self.buttons = []
+
+        # 1. Static atmospheric background
+        self.screen.blit(self.bg_static, (0, 0))
+
+        # 2. Dynamic background elements from HTML
+        self._draw_glowing_eyes(t)
+        self._draw_hanging_skull(90, 0, 120, 1.0, t)
+        self._draw_hanging_skull(W - 85, 0, 95, 0.8, t)
+        self._draw_marching_zombies(t)
+
+        # 3. Game screens
+        if game.state is None:
+            self.draw_menu()
+            return
+
+        self.draw_header(game)
+        self.draw_cards(game, t)
+        self.draw_board(game, t)
+        self.draw_bottom_bar(game)
+
+        if game.phase == Phase.MENU:
+            self.draw_menu()
+        elif game.phase == Phase.PAUSED:
+            self.draw_pause()
+        elif game.phase == Phase.OVER:
+            self.draw_over(game)
