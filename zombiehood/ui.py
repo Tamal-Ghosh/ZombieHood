@@ -1,6 +1,6 @@
-# GLOBAL COMMIT: 21
+# GLOBAL COMMIT: 24
 # OWNER: Nijhum
-# COMMIT MESSAGE: Add renderer typography and horror background
+# COMMIT MESSAGE: Render board objects pawns and combat effects
 # REPOSITORY DESTINATION: zombiehood/ui.py
 # Cumulative snapshot: replace destination contents with this file.
 # Partial stage; follow GLOBAL_SERIAL.md before running.
@@ -360,19 +360,434 @@ class Renderer:
         pygame.draw.line(self.screen, body_col, (x + int(4 * k), hy + int(38 * k)), leg2_end, max(2, int(4 * k)))
 
     # ------------------------------------------------------------ sprites matching HTML SVG
+    def sprite_soldier(self, rect, color, is_female=False, dead=False):
+        """Soldier avatar sprite matching soldier(c, girl) in HTML."""
+        cx, cy, u = rect.centerx, rect.centery, rect.width
+        if dead:
+            # Gravestone
+            gw, gh = int(u * 0.52), int(u * 0.6)
+            gr = pygame.Rect(cx - gw // 2, cy - gh // 2, gw, gh)
+            pygame.draw.rect(self.screen, (120, 125, 130), gr,
+                             border_top_left_radius=gw // 2, border_top_right_radius=gw // 2)
+            self.text("RIP", int(u * 0.18), (30, 35, 40), (cx, cy), "center")
+            return
 
+        # Girl hair on back
+        if is_female:
+            hair_rect = pygame.Rect(cx + int(0.18 * u), cy - int(0.08 * u), int(0.24 * u), int(0.44 * u))
+            pygame.draw.ellipse(self.screen, (107, 58, 26), hair_rect)
 
+        # Face circle (#e8b48a)
+        face_r = int(0.31 * u)
+        pygame.draw.circle(self.screen, (232, 180, 138), (cx, int(cy + 0.05 * u)), face_r)
+        pygame.draw.circle(self.screen, (34, 34, 34), (cx, int(cy + 0.05 * u)), face_r, 2)
 
+        # Helmet (#5a6b3a)
+        pts = [(cx + math.cos(math.pi + i * math.pi / 12) * 0.34 * u,
+                cy - 0.02 * u + math.sin(math.pi + i * math.pi / 12) * 0.34 * u) for i in range(13)]
+        pygame.draw.polygon(self.screen, (90, 107, 58), pts)
+        pygame.draw.polygon(self.screen, (34, 34, 34), pts, 2)
 
+        # Helmet band (#3d4a26) and colored headband (color)
+        band_y = cy - int(0.08 * u)
+        pygame.draw.rect(self.screen, (61, 74, 38), (cx - int(0.33 * u), band_y, int(0.66 * u), int(0.09 * u)))
+        pygame.draw.rect(self.screen, color, (cx - int(0.31 * u), band_y + 1, int(0.62 * u), int(0.06 * u)))
 
+        # Eyes (#222)
+        for ex in (-int(0.12 * u), int(0.12 * u)):
+            pygame.draw.circle(self.screen, (34, 34, 34), (cx + ex, int(cy + 0.14 * u)), max(2, int(0.04 * u)))
 
+        # Mouth (#7a2a1a)
+        pygame.draw.line(self.screen, (122, 42, 26),
+                         (cx - int(0.08 * u), int(cy + 0.24 * u)),
+                         (cx + int(0.08 * u), int(cy + 0.24 * u)), 2)
 
+        # Girl hair clip (#ff7bb5)
+        if is_female:
+            pygame.draw.circle(self.screen, (255, 123, 181), (cx + int(0.24 * u), cy - int(0.04 * u)), 4)
+            pygame.draw.circle(self.screen, (34, 34, 34), (cx + int(0.24 * u), cy - int(0.04 * u)), 4, 1)
+
+    def sprite_zombie(self, rect):
+        """Zombie head sprite matching the detailed HTML SVG."""
+        cx, cy, u = rect.centerx, rect.centery, rect.width
+        r = int(0.36 * u)
+
+        # Green head (#7fb85a, outline #1b3410)
+        pygame.draw.circle(self.screen, (127, 184, 90), (cx, cy), r)
+        pygame.draw.circle(self.screen, (27, 52, 16), (cx, cy), r, 2)
+
+        # Exposed skull / brain fragment (#e4dcb4)
+        pygame.draw.arc(self.screen, (228, 220, 180),
+                        (cx - int(r * 0.1), cy - int(r * 0.95), int(r * 1.1), int(r * 0.9)),
+                        0.2, 1.5, 4)
+
+        # Decaying patch (#5c8f3e)
+        pygame.draw.circle(self.screen, (92, 143, 62), (cx - int(r * 0.35), cy - int(r * 0.35)), int(r * 0.32))
+
+        # Big eyes with dark sockets (#2f5420), black pupil, red glowing dot (#ff2d2d)
+        for ex in (-int(0.14 * u), int(0.14 * u)):
+            ey = cy - int(0.04 * u)
+            pygame.draw.circle(self.screen, (47, 84, 32), (cx + ex, ey), int(0.12 * u))
+            pygame.draw.circle(self.screen, (10, 10, 10), (cx + ex, ey), int(0.08 * u))
+            pygame.draw.circle(self.screen, (255, 45, 45), (cx + ex + 1, ey), 2)
+
+        # Gaping bloody mouth (#2a0808) with teeth (#ece6c0)
+        mouth = [
+            (cx - int(0.20 * u), cy + int(0.14 * u)),
+            (cx - int(0.12 * u), cy + int(0.22 * u)),
+            (cx, cy + int(0.25 * u)),
+            (cx + int(0.12 * u), cy + int(0.22 * u)),
+            (cx + int(0.20 * u), cy + int(0.14 * u)),
+            (cx + int(0.10 * u), cy + int(0.32 * u)),
+            (cx - int(0.10 * u), cy + int(0.32 * u)),
+        ]
+        pygame.draw.polygon(self.screen, (42, 8, 8), mouth)
+        pygame.draw.polygon(self.screen, (27, 52, 16), mouth, 1)
+
+        # Teeth lines
+        for tx in (-int(0.09 * u), 0, int(0.09 * u)):
+            pygame.draw.line(self.screen, (236, 230, 192),
+                             (cx + tx, cy + int(0.15 * u)),
+                             (cx + tx, cy + int(0.22 * u)), 2)
+
+        # Blood cuts (#b01e24)
+        pygame.draw.line(self.screen, (176, 30, 36),
+                         (cx + int(0.24 * u), cy + int(0.08 * u)),
+                         (cx + int(0.28 * u), cy + int(0.26 * u)), 2)
+
+    def sprite_coin(self, rect, value):
+        """Gold coin sprite matching coin(v) in HTML."""
+        cx, cy, u = rect.centerx, rect.centery, rect.width
+        r_outer = int(0.42 * u)
+        r_inner = int(0.32 * u)
+
+        # Outer rim #f2a900, border #8a5200
+        pygame.draw.circle(self.screen, (242, 169, 0), (cx, cy), r_outer)
+        pygame.draw.circle(self.screen, (138, 82, 0), (cx, cy), r_outer, 2)
+
+        # Inner gold circle #ffd23f, border #c98500
+        pygame.draw.circle(self.screen, GOLD, (cx, cy), r_inner)
+        pygame.draw.circle(self.screen, (201, 133, 0), (cx, cy), r_inner, 1)
+
+        # White shine arc #fff3b0
+        pygame.draw.arc(self.screen, (255, 243, 176),
+                        (cx - r_inner + 2, cy - r_inner + 2, (r_inner - 2) * 2, (r_inner - 2) * 2),
+                        math.pi * 0.45, math.pi * 0.95, 2)
+
+        # Value text in #6a3b00
+        font_sz = int(u * 0.29) if value >= 10 else int(u * 0.35)
+        self.text(value, font_sz, (106, 59, 0), (cx, cy), "center", bold=True)
+
+    def sprite_heart(self, rect, fill_col=(255, 38, 62), outline_col=(160, 18, 30), shine=True):
+        """Crisp, high-contrast heart icon with curved lobes and clean perimeter."""
+        cx, cy = rect.center
+        sz = rect.width
+        r = max(2, int(sz * 0.28))
+        top_y = cy - int(sz * 0.12)
+        tip_y = cy + int(sz * 0.46)
+        col = fill_col if shine else (24, 34, 46)
+        border_col = outline_col if shine else (90, 115, 145)
+
+        # Solid fill
+        pygame.draw.circle(self.screen, col, (cx - r, top_y), r)
+        pygame.draw.circle(self.screen, col, (cx + r, top_y), r)
+        pts = [(cx - int(r * 1.95), top_y + int(r * 0.2)),
+               (cx + int(r * 1.95), top_y + int(r * 0.2)),
+               (cx, tip_y)]
+        pygame.draw.polygon(self.screen, col, pts)
+
+        # Clean outer perimeter (no interior cross lines)
+        pygame.draw.arc(self.screen, border_col, (cx - 2 * r, top_y - r, 2 * r, 2 * r), 0, math.pi, 1)
+        pygame.draw.arc(self.screen, border_col, (cx, top_y - r, 2 * r, 2 * r), 0, math.pi, 1)
+        pygame.draw.line(self.screen, border_col, pts[0], (cx, tip_y), 1)
+        pygame.draw.line(self.screen, border_col, pts[1], (cx, tip_y), 1)
+
+        # Crisp shine highlight arc
+        if shine:
+            pygame.draw.arc(self.screen, (255, 235, 245),
+                            (cx - r - 2, top_y - r, r * 2, r * 2),
+                            math.pi * 0.25, math.pi * 0.85, 2)
+
+    def sprite_heart_pickup(self, rect):
+        """Crisp, vibrant, high-contrast Heart pickup on the grid."""
+        cx, cy, u = rect.centerx, rect.centery, rect.width
+
+        # 1. Soft glowing red aura
+        aura = pygame.Surface((u, u), pygame.SRCALPHA)
+        pygame.draw.circle(aura, (255, 45, 65, 55), (u // 2, u // 2), int(u * 0.44))
+        self.screen.blit(aura, rect.topleft)
+
+        # 2. Heart geometry: width ~68% of tile, height ~60%
+        hw = int(u * 0.68)
+        hh = int(u * 0.62)
+        top_y = cy - hh // 2
+        bot_y = cy + hh // 2
+        hr = hw // 4
+        c1 = (cx - hr, top_y + hr)
+        c2 = (cx + hr, top_y + hr)
+
+        # White outer border for strong contrast on dark tiles
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+            pygame.draw.circle(self.screen, (255, 255, 255), (c1[0] + dx, c1[1] + dy), hr + 1)
+            pygame.draw.circle(self.screen, (255, 255, 255), (c2[0] + dx, c2[1] + dy), hr + 1)
+            pygame.draw.polygon(self.screen, (255, 255, 255), [
+                (cx - hw // 2 - 1 + dx, top_y + hr + dy),
+                (cx + hw // 2 + 1 + dx, top_y + hr + dy),
+                (cx + dx, bot_y + 1 + dy)
+            ])
+
+        # Vibrant ruby red heart body
+        body_col = (255, 25, 55)
+        pygame.draw.circle(self.screen, body_col, c1, hr + 1)
+        pygame.draw.circle(self.screen, body_col, c2, hr + 1)
+        pygame.draw.polygon(self.screen, body_col, [
+            (cx - hw // 2, top_y + hr),
+            (cx + hw // 2, top_y + hr),
+            (cx, bot_y)
+        ])
+
+        # Glossy highlight shine
+        pygame.draw.arc(self.screen, (255, 215, 225),
+                        (c1[0] - hr + 1, c1[1] - hr + 1, hr * 2 - 2, hr * 2 - 2),
+                        0.7, 2.7, 2)
+
+        # Crisp white '+' in center
+        pw = max(2, int(u * 0.08))
+        pl = max(6, int(u * 0.26))
+        pygame.draw.rect(self.screen, (255, 255, 255), (cx - pw // 2, cy - pl // 2 + 1, pw, pl))
+        pygame.draw.rect(self.screen, (255, 255, 255), (cx - pl // 2, cy - pw // 2 + 1, pl, pw))
+
+    def draw_iron_frame(self, rect):
+        """Riveted metallic border matching .cell.lockd in HTML."""
+        # Frame outer
+        pygame.draw.rect(self.screen, (169, 179, 186), rect, 3)
+        pygame.draw.rect(self.screen, (57, 64, 70), rect.inflate(-4, -4), 1)
+        # 4 Corner rivets (#d5dce1)
+        for rx, ry in [(rect.left + 3, rect.top + 3),
+                       (rect.right - 4, rect.top + 3),
+                       (rect.left + 3, rect.bottom - 4),
+                       (rect.right - 4, rect.bottom - 4)]:
+            pygame.draw.circle(self.screen, (213, 220, 225), (rx, ry), 2)
+
+    def sprite_steel_box(self, rect):
+        """Heavy industrial steel box / cargo crate for blocked cells."""
+        r = rect.inflate(-2, -2)
+        pygame.draw.rect(self.screen, (22, 28, 35), r, border_radius=4)
+
+        inner = r.inflate(-2, -2)
+        pygame.draw.rect(self.screen, (72, 84, 98), inner, border_radius=3)
+
+        # 3D Beveled steel edge lighting
+        pygame.draw.line(self.screen, (150, 168, 185), inner.topleft, inner.topright, 2)
+        pygame.draw.line(self.screen, (150, 168, 185), inner.topleft, inner.bottomleft, 2)
+        pygame.draw.line(self.screen, (38, 45, 54), inner.bottomleft, inner.bottomright, 2)
+        pygame.draw.line(self.screen, (38, 45, 54), inner.topright, inner.bottomright, 2)
+
+        plate = inner.inflate(-6, -6)
+        if plate.width > 4 and plate.height > 4:
+            pygame.draw.rect(self.screen, (58, 68, 80), plate, border_radius=2)
+            pygame.draw.rect(self.screen, (35, 42, 50), plate, 1, border_radius=2)
+
+            # Reinforced diagonal steel X-brace
+            pygame.draw.line(self.screen, (35, 42, 50), plate.topleft, plate.bottomright, 2)
+            pygame.draw.line(self.screen, (105, 122, 140), (plate.left + 1, plate.top), (plate.right, plate.bottom - 1), 1)
+            pygame.draw.line(self.screen, (35, 42, 50), plate.topright, plate.bottomleft, 2)
+            pygame.draw.line(self.screen, (105, 122, 140), (plate.right - 1, plate.top), (plate.left, plate.bottom - 1), 1)
+
+            # Central steel bolt / hub
+            cx, cy = plate.center
+            pygame.draw.circle(self.screen, (35, 42, 50), (cx, cy), 4)
+            pygame.draw.circle(self.screen, (130, 148, 166), (cx, cy), 3)
+            pygame.draw.circle(self.screen, (200, 215, 230), (cx - 1, cy - 1), 1)
+
+        # Four heavy steel corner rivets / bolts
+        for rx, ry in [(r.left + 4, r.top + 4),
+                       (r.right - 5, r.top + 4),
+                       (r.left + 4, r.bottom - 5),
+                       (r.right - 5, r.bottom - 5)]:
+            pygame.draw.circle(self.screen, (28, 35, 42), (rx, ry), 2)
+            pygame.draw.circle(self.screen, (185, 200, 215), (rx, ry), 1)
+
+    def sprite_goal(self, rect, unlocked_survivors, t):
+        """Goal cell matching lock SVG in HTML with unlocked initials."""
+        unlocked = len(unlocked_survivors) > 0
+        pulse = 0.5 + 0.5 * math.sin(t / 250.0)
+
+        # Border color & glow
+        col = (90, 235, 120) if unlocked else (255, 138, 31)
+        glow = pygame.Surface(rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(glow, (*col, int(45 + 55 * pulse)), glow.get_rect(), border_radius=6)
+        self.screen.blit(glow, rect.topleft)
+
+        cx, cy, u = rect.centerx, rect.centery, rect.width
+
+        if unlocked:
+            # Open portal border
+            pygame.draw.rect(self.screen, col, rect, 3, border_radius=6)
+
+            # Padlock (Open shackle)
+            shackle_rect = pygame.Rect(cx - int(0.12 * u), cy - int(0.32 * u), int(0.24 * u), int(0.24 * u))
+            pygame.draw.arc(self.screen, (34, 34, 34), shackle_rect, 0, math.pi, 3)
+            # Padlock body (#ffa733)
+            body = pygame.Rect(cx - int(0.22 * u), cy - int(0.10 * u), int(0.44 * u), int(0.30 * u))
+            pygame.draw.rect(self.screen, (120, 230, 130), body, border_radius=3)
+            pygame.draw.rect(self.screen, (34, 34, 34), body, 2, border_radius=3)
+
+            # Draw initials of unlocked survivors on the goal
+            n = len(unlocked_survivors)
+            font_sz = 16 if n == 1 else (13 if n == 2 else 11)
+            spacing = rect.width // (n + 1)
+            for i, sv in enumerate(unlocked_survivors):
+                lx = rect.left + spacing * (i + 1)
+                ly = rect.centery + int(0.12 * u)
+                pill = pygame.Rect(0, 0, font_sz + 4, font_sz + 4)
+                pill.center = (lx, ly)
+                pygame.draw.rect(self.screen, (10, 20, 25), pill, border_radius=3)
+                pygame.draw.rect(self.screen, sv.color, pill, 1, border_radius=3)
+                self.text(sv.name[0], font_sz, sv.color, (lx, ly), "center", bold=True)
+        else:
+            # Locked state: iron frame + diagonal cross (#aaa) + orange lock
+            self.draw_iron_frame(rect)
+            pygame.draw.line(self.screen, (170, 170, 170), rect.topleft, rect.bottomright, 3)
+            pygame.draw.line(self.screen, (170, 170, 170), rect.topright, rect.bottomleft, 3)
+
+            # Closed padlock
+            shackle_rect = pygame.Rect(cx - int(0.15 * u), cy - int(0.30 * u), int(0.30 * u), int(0.26 * u))
+            pygame.draw.arc(self.screen, (34, 34, 34), shackle_rect, 0, math.pi, 4)
+            pygame.draw.line(self.screen, (34, 34, 34), shackle_rect.midleft, (shackle_rect.left, cy - int(0.08 * u)), 4)
+            pygame.draw.line(self.screen, (34, 34, 34), shackle_rect.midright, (shackle_rect.right, cy - int(0.08 * u)), 4)
+
+            body = pygame.Rect(cx - int(0.24 * u), cy - int(0.08 * u), int(0.48 * u), int(0.32 * u))
+            pygame.draw.rect(self.screen, (255, 167, 51), body, border_radius=3)
+            pygame.draw.rect(self.screen, (34, 34, 34), body, 2, border_radius=3)
+            pygame.draw.circle(self.screen, (34, 34, 34), body.center, 3)
 
     # ------------------------------------------------------------ main board
+    def board_point(self, row, col, height=0):
+        """Orthographic 3D projection, shared by tiles, pieces and effects."""
+        sx = self.board_w / (self.cfg.rows + self.cfg.cols)
+        sy = (self.board_h - 100) / (self.cfg.rows + self.cfg.cols)
+        left = self.BX + self.cfg.rows * sx
+        return (round(left + (col - row) * sx),
+                round(self.BY + 40 + (row + col) * sy - height))
 
+    def tile_polygon(self, pos, height=0, inset=0.035):
+        r, c = pos
+        return [self.board_point(r + dr, c + dc, height)
+                for dr, dc in ((inset, inset), (inset, 1-inset),
+                               (1-inset, 1-inset), (1-inset, inset))]
 
+    def board_block(self, pos, height, color, base=0, inset=0.035):
+        top = self.tile_polygon(pos, height, inset)
+        bottom = self.tile_polygon(pos, base, inset)
+        for edge, shade in ((1, 0.48), (2, 0.68)):
+            face = [top[edge], top[(edge+1) % 4],
+                    bottom[(edge+1) % 4], bottom[edge]]
+            pygame.draw.polygon(self.screen, lerp((0, 0, 0), color, shade), face)
+            pygame.draw.polygon(self.screen, (12, 22, 24), face, 1)
+        pygame.draw.polygon(self.screen, color, top)
+        pygame.draw.polygon(self.screen, (65, 94, 87), top, 1)
+        return top
 
+    def piece_rect(self, pos, size=None, height=0):
+        size = size or max(18, int(self.cell * 0.48))
+        x, y = self.board_point(pos[0]+0.5, pos[1]+0.5, height)
+        return pygame.Rect(x-size//2, y-size, size, size)
 
+    def draw_board(self, game, t):
+        st = game.state
+        # Thick board plinth with two shaded faces and a cast shadow.
+        corners = [self.board_point(r, c) for r, c in
+                   ((0, 0), (0, self.cfg.cols),
+                    (self.cfg.rows, self.cfg.cols), (self.cfg.rows, 0))]
+        pygame.draw.polygon(self.screen, (6, 9, 13),
+                            [(x+9, y+25) for x, y in corners])
+        for edge, color in ((1, (16, 35, 32)), (2, (26, 51, 43))):
+            a, b = corners[edge], corners[(edge+1) % 4]
+            pygame.draw.polygon(self.screen, color,
+                                [a, b, (b[0], b[1]+18), (a[0], a[1]+18)])
+        pygame.draw.polygon(self.screen, (17, 31, 29), corners)
+        pygame.draw.polygon(self.screen, BOARD_BORDER, corners, 3)
+
+        # Paint ground first so a front tile never covers a standing piece.
+        zombies = {z.pos: z for z in st.zombies if z.alive}
+        for r in range(self.cfg.rows):
+            for c in range(self.cfg.cols):
+                pos = (r, c)
+                col = TILE_A if (r+c) % 2 == 0 else TILE_B
+                if pos in zombies:
+                    col = TILE_ZOMBIE
+                elif pos in st.buried_cells:
+                    col = (45, 29, 35)
+                self.board_block(pos, 3, col)
+                outline = ((74, 163, 255) if pos in st.blue_cells else
+                           (255, 123, 181) if pos in st.pink_cells else None)
+                if outline:
+                    pygame.draw.polygon(self.screen, outline,
+                                        self.tile_polygon(pos, 4, 0.13), 2)
+
+        unlocked = [sv for sv in st.survivors if sv.alive and st.goal_unlocked_for(sv)]
+        # Back-to-front painter order for raised objects on the ground plane.
+        survivors = {}
+        for sv in st.survivors:
+            survivors.setdefault(sv.pos, []).append(sv)
+        positions = (set(st.obstacles) | set(st.coins) | set(st.hearts)
+                     | set(zombies) | set(st.buried_cells) | set(survivors) | {st.goal})
+        for pos in sorted(positions, key=lambda p: (sum(p), p[0])):
+            x, y = self.board_point(pos[0]+0.5, pos[1]+0.5, 4)
+            size = max(18, int(self.cell * 0.48))
+            if pos in st.obstacles:
+                top = self.board_block(pos, self.cell*0.38, (92, 112, 123), base=3, inset=0.12)
+                pygame.draw.line(self.screen, (166, 183, 183), top[0], top[2], 2)
+                pygame.draw.line(self.screen, (40, 55, 64), top[1], top[3], 2)
+            if pos in st.coins:
+                rect = self.piece_rect(pos, size, 3)
+                self.sprite_coin(rect, st.coins[pos])
+            if pos in st.hearts:
+                self.sprite_heart_pickup(self.piece_rect(pos, size, 3))
+            if pos == st.goal:
+                color = (90, 235, 120) if unlocked else (255, 138, 31)
+                pygame.draw.polygon(self.screen, color, self.tile_polygon(pos, 5, 0.08), 2)
+                self.sprite_goal(self.piece_rect(pos, size, 5), unlocked, t)
+            if pos in st.buried_cells and pos not in survivors:
+                self.sprite_soldier(self.piece_rect(pos, size, 4), DIM, dead=True)
+            pieces = [(None, True)] if pos in zombies else []
+            pieces += [(sv, False) for sv in survivors.get(pos, [])]
+            for sv, zombie in pieces:
+                color = (127, 184, 90) if zombie else sv.color
+                if sv and sv.alive and st.turn == sv.idx and game.phase == Phase.PLAYING:
+                    pygame.draw.polygon(self.screen, color,
+                                        self.tile_polygon(pos, 5, 0.08), 2)
+                pygame.draw.ellipse(self.screen, (9, 17, 19), (x-size//2, y-4, size, 9))
+                if sv and not sv.alive:
+                    self.sprite_soldier(self.piece_rect(pos, size, 4), color, dead=True)
+                    continue
+                # Pawn body and shaded base anchor the original avatars in space.
+                pygame.draw.ellipse(self.screen, lerp((0, 0, 0), color, 0.4),
+                                    (x-size//3, y-6, size*2//3, 9))
+                pygame.draw.polygon(self.screen, lerp((0, 0, 0), color, 0.65),
+                                    [(x-size//4, y-5), (x-size//5, y-size),
+                                     (x+size//5, y-size), (x+size//4, y-5)])
+                rect = self.piece_rect(pos, size, size*0.45)
+                if zombie:
+                    self.sprite_zombie(rect)
+                else:
+                    self.sprite_soldier(rect, color, is_female=sv.female)
+                    self.text(sv.name[0], 10, color, (x+size//2, y-5), "bottomleft")
+                    if sv.reached_goal:
+                        self.text("WINNER!", 11, GOLD, (x, rect.top-8), "center")
+
+        for fx in game.effects:
+            k = 1.0 - fx["ttl"] / fx["total"]
+            if fx["kind"] == "shot":
+                a = self.board_point(fx["src"][0]+0.5, fx["src"][1]+0.5, 20)
+                b = self.board_point(fx["dst"][0]+0.5, fx["dst"][1]+0.5, 20)
+                pygame.draw.line(self.screen, (255, 255, 200), a, b, 4)
+                pygame.draw.line(self.screen, fx["color"], a, b, 2)
+                pygame.draw.circle(self.screen, (255, 120, 60), b, int(6+14*k), 2)
+            else:
+                x, y = self.board_point(fx["pos"][0]+0.5, fx["pos"][1]+0.5, 30+16*k)
+                self.text(fx["text"], 14, fx["color"], (x, y), "center")
 
     # ------------------------------------------------------------ Header & Cards matching HTML
 
