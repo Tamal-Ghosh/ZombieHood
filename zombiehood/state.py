@@ -161,8 +161,89 @@ class GameState:
     def alive_survivors(self):
         return [s for s in self.survivors if s.alive]
 
+    def can_survivor_win(self, s):
+        """Check if survivor ``s`` has any theoretical possibility to unlock and reach the goal."""
+        if s.reached_goal:
+            return True
+        if not s.alive:
+            return False
 
+        # If map never had enough coins or zombies to unlock goal (e.g. synthetic test), don't declare unwinnable
+        if self.initial_coins < self.cfg.coins_to_kill and self.initial_zombies < self.cfg.kills_to_unlock:
+            return True
+
+        # Total coins in existence that s could possibly obtain
+        total_coins_possible = sum(self.coins.values()) + sum(o.coins for o in self.survivors if o.alive)
+        living_zombies = [z for z in self.zombies if z.alive]
+
+        # Can s unlock the goal?
+        if not self.goal_unlocked_for(s):
+            kills_needed = self.cfg.kills_to_unlock - s.kills
+            if len(living_zombies) < kills_needed and self.initial_zombies >= self.cfg.kills_to_unlock:
+                return False
+            if total_coins_possible < self.cfg.coins_to_kill and self.initial_coins >= self.cfg.coins_to_kill:
+                return False
+
+        # Can s physically reach the goal?
+        # Obstacles and buried cells are impassable walls.
+        # Living zombie cells are impassable walls unless they can be killed.
+        can_kill = (total_coins_possible >= self.cfg.coins_to_kill and len(living_zombies) > 0)
+        impassable = set(self.obstacles) | set(self.buried_cells)
+        if not can_kill:
+            impassable |= set(self.zombie_cells)
+
+        if self.goal in impassable:
+            return False
+
+        q = deque([s.pos])
+        seen = {s.pos}
+        while q:
+            curr = q.popleft()
+            if curr == self.goal:
+                return True
+            for dr, dc in DIRS.values():
+                nxt = (curr[0] + dr, curr[1] + dc)
+                if (0 <= nxt[0] < self.rows and 0 <= nxt[1] < self.cols
+                        and nxt not in impassable and nxt not in seen):
+                    seen.add(nxt)
+                    q.append(nxt)
+        return False
+
+    def can_any_survivor_win(self):
+        alive = self.alive_survivors()
+        if not alive:
+            return False
+        return any(self.can_survivor_win(s) for s in alive)
 
     # ------------------------------------------------------------ acting
 
     # ------------------------------------------------------------ turns
+    def _advance(self):
+        if self.over:
+            return
+        if not any(s.alive for s in self.survivors):
+            self.over, self.reason = True, "all_dead"
+            return
+        if not self.can_any_survivor_win():
+            self.over, self.winner, self.reason = True, None, "draw"
+            return
+        n, i = len(self.survivors), self.turn
+        while True:
+            i = (i + 1) % n
+            if i == 0:
+                self.round += 1
+            if self.survivors[i].alive:
+                break
+        self.turn = i
+        if self.round >= self.cfg.max_rounds:
+            alive = self.alive_survivors()
+            if not alive:
+                self.over, self.winner, self.reason = True, None, "all_dead"
+                return
+            max_score = max(s.score for s in alive)
+            top = [s for s in alive if s.score == max_score]
+            if len(top) > 1:
+                self.over, self.winner, self.reason = True, None, "draw"
+            else:
+                best = top[0]
+                self.over, self.winner, self.reason = True, best.idx, "timeup"
