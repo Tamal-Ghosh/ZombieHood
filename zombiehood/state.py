@@ -216,6 +216,104 @@ class GameState:
         return any(self.can_survivor_win(s) for s in alive)
 
     # ------------------------------------------------------------ acting
+    def apply(self, idx, action):
+        """Perform ``action`` for survivor ``idx``.
+
+        Returns a list of event tuples, or ``None`` if the action is illegal
+        (nothing changes and the turn is not consumed).
+        """
+        if self.over or idx != self.turn:
+            return None
+        s = self.survivors[idx]
+        if not s.alive:
+            return None
+        cfg, ev = self.cfg, []
+
+        if action in DIRS:
+            dr, dc = DIRS[action]
+            new = (s.pos[0] + dr, s.pos[1] + dc)
+            if not self.can_enter(s, new):
+                return None
+
+            # Face-to-face clash: check if opponent occupies `new`
+            opponent = next((o for o in self.survivors if o.alive and o.idx != s.idx and o.pos == new), None)
+            if opponent is not None:
+                stolen = opponent.coins
+                s.coins += stolen
+                s.score += stolen
+                opponent.coins = 0
+                opponent.lose_life(1)
+                ev.append(("clash", idx, opponent.idx, stolen, new))
+
+                if opponent.alive:
+                    flee_to = self.find_flee_cell(opponent, s.pos)
+                    opponent.pos = flee_to
+                    ev.append(("flee", opponent.idx, flee_to))
+                else:
+                    ev.append(("death", opponent.idx, new))
+                    self.buried_cells.add(new)
+
+            s.pos = new
+            ev.append(("move", idx, new))
+            value = self.coins.pop(new, None)
+            if value is not None:
+                gain = value * cfg.coin_multiplier
+                s.score += gain
+                s.coins += value
+                ev.append(("coin", idx, value, gain, new))
+            if new in self.hearts and s.gain_life():
+                self.hearts.discard(new)
+                ev.append(("heart", idx, new))
+            if new in self.blue_cells:
+                penalty = 1
+                lost = min(s.coins, penalty)
+                s.coins -= lost
+                s.score = max(0, s.score - lost)
+                ev.append(("penalty", idx, penalty, lost, new, "blue"))
+            elif new in self.pink_cells:
+                penalty = 2
+                lost = min(s.coins, penalty)
+                s.coins -= lost
+                s.score = max(0, s.score - lost)
+                ev.append(("penalty", idx, penalty, lost, new, "pink"))
+            adj = adjacent_alive(self.zombies, new)
+            if adj:
+                s.lose_life(len(adj) * cfg.zombie_damage)
+                lost_coins = s.coins
+                s.score = max(0, s.score - lost_coins)
+                s.coins = 0
+                ev.append(("hit", idx, len(adj), new, lost_coins))
+                if not s.alive:
+                    ev.append(("death", idx, new))
+                    self.buried_cells.add(new)
+            if s.alive and new == self.goal and self.goal_unlocked_for(s):
+                s.reached_goal = True
+                self.over, self.winner, self.reason = True, idx, "goal"
+                ev.append(("goal", idx))
+
+        elif action == "ATTACK":
+            if s.coins < cfg.coins_to_kill:
+                return None
+            targets = self.zombies_in_range(s.pos)
+            if not targets:
+                return None
+            z = min(targets, key=lambda t: (manhattan(t.pos, s.pos), t.id))
+            was_open = self.goal_unlocked_for(s)
+            z.kill()
+            self.zombie_cells.discard(z.pos)
+            s.kills += 1
+            s.score += cfg.zombie_kill_score
+            ev.append(("kill", idx, z.id, z.pos))
+            if not was_open and self.goal_unlocked_for(s):
+                ev.append(("unlock", idx))
+
+        elif action == "WAIT":
+            ev.append(("wait", idx))
+        else:
+            return None
+
+        self._advance()
+        return ev
 
     # ------------------------------------------------------------ turns
     def _advance(self):
