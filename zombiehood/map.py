@@ -33,6 +33,101 @@ class MapData:
     obstacles: set = field(default_factory=set)
     seed: int = 0
 
+def generate_map(cfg, seed=None):
+    """Create a valid random map.  The same seed always gives the same map."""
+    if seed is None:
+        seed = cfg.seed
+    if seed is None:
+        seed = random.randrange(1, 2 ** 31 - 1)
+    rng = random.Random(seed)
+    for _ in range(500):
+        m = _attempt(cfg, rng, seed)
+        if m is not None and not validate_map(m, cfg):
+            return m
+    raise RuntimeError("could not build a valid map with this configuration")
+
+def _attempt(cfg, rng, seed):
+    rows, cols = cfg.rows, cfg.cols
+    n_agents = len(cfg.agents)
+    occupied = {cfg.goal}
+
+    agent_rows = rng.sample(range(rows), n_agents)
+    starts = []
+    for r in agent_rows:
+        options = [c for c in range(cols) if (r, c) not in occupied]
+        if not options:
+            return None
+        cell = (r, rng.choice(options))
+        starts.append(cell)
+        occupied.add(cell)
+
+    heart_cells = [(r, c) for r in range(rows) if r not in agent_rows
+                   for c in range(cols) if (r, c) not in occupied]
+    if len(heart_cells) < cfg.heart_count:
+        return None
+    hearts = set(rng.sample(heart_cells, cfg.heart_count))
+    occupied |= hearts
+
+    zrows = [r for r in range(rows) if r not in agent_rows]
+    rng.shuffle(zrows)
+
+    def place(start, used_cols, picked):
+        if len(picked) == cfg.zombie_count:
+            return picked
+        for a in range(start, len(zrows)):
+            r = zrows[a]
+            opts = [c for c in range(cols)
+                    if c not in used_cols and (r, c) not in occupied]
+            rng.shuffle(opts)
+            for c in opts:
+                used_cols.add(c)
+                res = place(a + 1, used_cols, picked + [(r, c)])
+                if res:
+                    return res
+                used_cols.discard(c)
+        return None
+
+    zombies = place(0, set(), [])
+    if zombies is None:
+        return None
+    occupied |= set(zombies)
+
+    def score(cell):
+        return (min(chebyshev(cell, a) for a in starts)
+                - 1.5 * min(chebyshev(cell, z) for z in zombies))
+
+    values = sorted(cfg.coin_values, reverse=True)
+    infos = []
+    for r in range(rows):
+        opts = sorted(((r, c) for c in range(cols) if (r, c) not in occupied),
+                      key=score, reverse=True)
+        if opts:
+            infos.append((score(opts[0]) + rng.random() * 3, opts))
+    infos.sort(key=lambda x: -x[0])
+    coins = {}
+    for value, (_, opts) in zip(values, infos):
+        pool = opts[:3] if value >= cfg.high_coin_value else opts
+        cell = rng.choice(pool)
+        coins[cell] = value
+        occupied.add(cell)
+
+    free = [(r, c) for r in range(rows) for c in range(cols)
+            if (r, c) not in occupied]
+    obs_count = cfg.obstacle_count
+    if isinstance(obs_count, (tuple, list)):
+        obs_count = rng.randint(obs_count[0], obs_count[1])
+    elif obs_count == 9:
+        obs_count = rng.randint(8, 10)
+    elif obs_count == 6:
+        obs_count = rng.randint(5, 6)
+    elif obs_count == 3:
+        obs_count = rng.randint(3, 4)
+    obstacles = set(rng.sample(free, obs_count)) \
+        if obs_count <= len(free) else set()
+
+    return MapData(rows, cols, cfg.goal, starts, zombies, coins, hearts,
+                   obstacles, seed)
+
 def reachable(m, start):
     """Cells reachable from ``start`` ignoring zombies (they can be shot)."""
     seen, q = {start}, deque([start])
