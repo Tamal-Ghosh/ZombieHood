@@ -150,3 +150,99 @@ class FuzzyAgent(Agent):
             "LOW": 0.0,
         }
         return self._defuzzify(rules)
+
+    def choose_action(self, state, idx):
+        s = state.survivors[idx]
+        cfg = state.cfg
+        penalty = danger_cost(s)
+        unlocked = state.goal_unlocked_for(s)
+        in_range = bool(state.zombies_in_range(s.pos))
+        can_attack = in_range and s.coins >= cfg.coins_to_kill
+
+        if unlocked:
+            for act_name, (dr, dc) in DIRS.items():
+                if (s.pos[0] + dr, s.pos[1] + dc) == state.goal:
+                    return act_name
+            res = fuzzy_path(state, idx, {state.goal}, 8 if s.lives > 1 else penalty)
+            if res:
+                path, cost = res
+                if can_attack and cost > len(path):
+                    return "ATTACK"
+                return step_to_action(s.pos, path[0])
+            return "ATTACK" if can_attack else "WAIT"
+
+        if can_attack:
+            return "ATTACK"
+
+        self.pos_history.append(s.pos)
+        self.pos_history = self.pos_history[-10:]
+        is_oscillating = len(self.pos_history) >= 3 and self.pos_history[-3] == s.pos
+        prev_pos = self.pos_history[-2] if len(self.pos_history) >= 2 else None
+
+        candidates = []
+
+        for cell, val in state.coins.items():
+            res = fuzzy_path(state, idx, {cell}, penalty)
+            if res:
+                path, cost = res
+                fuzzy_score = self.evaluate_coin_utility(val, cost, s.coins, cfg.coins_to_kill)
+                if s.lives <= 1 and state.is_adjacent_to_zombie(cell):
+                    fuzzy_score *= 0.15
+                candidates.append((fuzzy_score / (cost + 1), path[0]))
+
+        if s.coins >= cfg.coins_to_kill and state.zombie_cells:
+            firing_spots = set()
+            for z in state.zombie_cells:
+                for dr in range(-cfg.attack_range, cfg.attack_range + 1):
+                    for dc in range(-cfg.attack_range, cfg.attack_range + 1):
+                        p = (z[0] + dr, z[1] + dc)
+                        if (manhattan(p, z) <= cfg.attack_range
+                                and state.in_bounds(p)
+                                and not state.is_adjacent_to_zombie(p)
+                                and p not in state.zombie_cells):
+                            firing_spots.add(p)
+            if firing_spots:
+                res = fuzzy_path(state, idx, firing_spots, penalty)
+                if res:
+                    path, cost = res
+
+                    candidates.append(((130.0 / (cost + 1)), path[0]))
+
+        for other in state.survivors:
+            if other.idx != idx and other.alive and other.coins > 4:
+                diff = s.coins - other.coins
+                dist = manhattan(s.pos, other.pos)
+                clash_score = self.evaluate_clash_utility(diff, dist)
+                if clash_score > 30.0:
+                    res = fuzzy_path(state, idx, {other.pos}, penalty)
+                    if res:
+                        path, cost = res
+                        candidates.append(((clash_score * 1.2 / (cost + 1)), path[0]))
+
+        if s.lives < s.max_lives:
+
+            life_critical = trapmf(s.lives, 0, 1, 1, 2)
+            for cell in state.hearts:
+                res = fuzzy_path(state, idx, {cell}, penalty)
+                if res:
+                    path, cost = res
+                    heart_score = 150.0 if life_critical > 0.5 else 45.0
+                    candidates.append(((heart_score / (cost + 1)), path[0]))
+
+        if not candidates:
+            return fallback_move(state, idx, self.rng, self.pos_history)
+
+        adjusted = []
+        for score, step in candidates:
+            if is_oscillating and step == prev_pos:
+                score *= 0.1
+            if step in state.pink_cells:
+                score *= 0.2 if s.coins > 0 else 0.5
+            elif step in state.blue_cells:
+                score *= 0.4 if s.coins > 0 else 0.7
+            adjusted.append((score, step))
+        adjusted.sort(key=lambda c: c[0], reverse=True)
+        act = step_to_action(s.pos, adjusted[0][1])
+        if act == "WAIT":
+            return fallback_move(state, idx, self.rng, self.pos_history)
+        return act
