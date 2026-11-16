@@ -244,3 +244,60 @@ class MCTSAgent(Agent):
 
         return min(1.0, max(0.0, (r + 500) / 1800.0))
 
+    def choose_action(self, state, idx):
+        s = state.survivors[idx]
+        cfg = state.cfg
+        legal = state.legal_actions(idx)
+        if not legal:
+            return "WAIT"
+        if len(legal) == 1:
+            return legal[0]
+
+        self.pos_history.append(s.pos)
+        self.pos_history = self.pos_history[-10:]
+        is_oscillating = len(self.pos_history) >= 3 and self.pos_history[-3] == s.pos
+        prev_pos = self.pos_history[-2] if len(self.pos_history) >= 2 else None
+
+        nodes = self._generate_intent_candidates(state, idx)
+        if not nodes:
+            return fallback_move(state, idx, self.rng, self.pos_history)
+        if len(nodes) == 1:
+            act = nodes[0].action
+            if is_oscillating and prev_pos and step_to_action(s.pos, prev_pos) == act:
+                return fallback_move(state, idx, self.rng, self.pos_history)
+            return act
+
+        # Run MCTS rollouts across candidate nodes
+        deadline = time.perf_counter() + self.time_limit
+        total_visits = 0
+
+        # Initial warm-up rollout for each node
+        for node in nodes:
+            reward = self._simulate_rollout(state, idx, node)
+            node.visits += 1
+            node.total_reward += reward
+            total_visits += 1
+
+        # UCT selection and simulation loop
+        for it in range(self.iterations):
+            if it % 5 == 0 and time.perf_counter() > deadline:
+                break
+            log_n = math.log(total_visits)
+            selected = max(nodes, key=lambda n: (n.total_reward / n.visits)
+                                                + self.c * math.sqrt(log_n / n.visits))
+            reward = self._simulate_rollout(state, idx, selected)
+            selected.visits += 1
+            selected.total_reward += reward
+            total_visits += 1
+
+        # Choose the node with highest visit count (avoiding reversal if oscillating)
+        best_node = max(nodes, key=lambda n: n.visits)
+        if is_oscillating and prev_pos:
+            reversal_act = step_to_action(s.pos, prev_pos)
+            non_rev = [n for n in nodes if n.action != reversal_act]
+            if non_rev:
+                best_node = max(non_rev, key=lambda n: n.visits)
+
+        if best_node.action == "WAIT":
+            return fallback_move(state, idx, self.rng, self.pos_history)
+        return best_node.action
