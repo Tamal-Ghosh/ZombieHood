@@ -19,7 +19,8 @@ class Phase(Enum):
 
 
 class Game:
-    def __init__(self, cfg=None):
+    def __init__(self, cfg=None, audio=None):
+        self.audio = audio
         self.cfg = cfg or Config()
         self.phase = Phase.MENU
         self.state = None
@@ -156,6 +157,8 @@ class Game:
             s = st.survivors[e[1]]
             col = s.color
             kind = e[0]
+            if self.audio is not None:
+                self.audio.event(kind)
             if kind == "coin":
                 self._say("🪙 💰 %s grabbed a %d coin (+%d)" % (s.name, e[2], e[3]), (255, 218, 80))
                 self._fx("float", pos=e[4], text="+%d" % e[3], color=(255, 215, 80))

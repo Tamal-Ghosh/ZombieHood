@@ -11,6 +11,7 @@ import sys
 import pygame
 from config import Config, make_config
 from game import Game, Phase
+from audio import Audio
 from ui import H, W, Renderer
 
 KEY_ACTIONS = {
@@ -86,7 +87,8 @@ def main():
         return ((pos[0] - area.x) * W / area.width,
                 (pos[1] - area.y) * H / area.height)
     clock = pygame.time.Clock()
-    game = Game(cfg)
+    audio = Audio()
+    game = Game(cfg, audio=audio)
     ui = Renderer(screen, cfg)
     if args.human:
         game.start_match([a["name"].lower() for a in cfg.agents].index(args.human), difficulty=args.difficulty)
@@ -153,7 +155,9 @@ def main():
                 game.change_speed(False)
             elif k in KEY_ACTIONS:
                 game.human_input(KEY_ACTIONS[k])
+        audio.sync(game.phase.value)
         game.update(clock.tick(60))
+        audio.sync(game.phase.value)
         ui.mouse_pos = logical_mouse(pygame.mouse.get_pos())
         ui.draw(game)
         area = viewport()
