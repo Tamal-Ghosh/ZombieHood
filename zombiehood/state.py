@@ -20,6 +20,7 @@ Rules in one place
   ``max_rounds`` the best living score wins (time up).
 """
 from collections import deque
+import random
 from map import DIRS, manhattan
 from survivor import Survivor
 from zombie import Zombie, adjacent_alive, in_range_alive
@@ -71,16 +72,21 @@ class GameState:
                      max_lives=cfg.max_lives)
             for i, sp in enumerate(cfg.agents)]
         zombies = [Zombie(i, p) for i, p in enumerate(m.zombies)]
-        diff = getattr(cfg, "difficulty", "hard").lower()
-        if diff == "easy":
-            blue_cells = set()
-            pink_cells = set()
-        elif diff == "medium":
-            blue_cells = {m.starts[0]} if len(m.starts) > 0 else set()
-            pink_cells = set()
-        else:
-            blue_cells = {m.starts[0]} if len(m.starts) > 0 else set()
-            pink_cells = {m.starts[1]} if len(m.starts) > 1 else set()
+        blue_cells = {m.starts[0]} if cfg.blue_cell_count and m.starts else set()
+        pink_cells = {m.starts[1]} if cfg.pink_cell_count and len(m.starts)>1 else set()
+        blocked = (set(m.obstacles) | set(m.zombies) | set(m.coins) | set(m.hearts)
+                   | set(m.starts) | {m.goal})
+        available = [(r,c) for r in range(m.rows) for c in range(m.cols)
+                     if (r,c) not in blocked]
+        rng = random.Random(m.seed + 9173)
+        rng.shuffle(available)
+        needed = cfg.blue_cell_count-len(blue_cells)+cfg.pink_cell_count-len(pink_cells)
+        if len(available)<needed:
+            raise ValueError("Not enough empty cells for blue and pink penalty tiles")
+        while len(blue_cells)<cfg.blue_cell_count:
+            blue_cells.add(available.pop())
+        while len(pink_cells)<cfg.pink_cell_count:
+            pink_cells.add(available.pop())
         return cls(cfg, m, survivors, zombies, blue_cells=blue_cells, pink_cells=pink_cells)
 
     # ------------------------------------------------------------ copying
@@ -234,6 +240,7 @@ class GameState:
             new = (s.pos[0] + dr, s.pos[1] + dc)
             if not self.can_enter(s, new):
                 return None
+            s.facing = action
 
             # Face-to-face clash: check if opponent occupies `new`
             opponent = next((o for o in self.survivors if o.alive and o.idx != s.idx and o.pos == new), None)

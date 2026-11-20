@@ -13,6 +13,8 @@ from state import GameState                                  # noqa: E402
 
 def make_state(starts=((0, 0), (11, 11), (11, 0)), zombies=(), coins=None,
                hearts=(), obstacles=(), goal=(5, 6), **cfg_kw):
+    cfg_kw.setdefault("blue_cell_count", 1)
+    cfg_kw.setdefault("pink_cell_count", 1)
     cfg = Config(**cfg_kw)
     m = MapData(cfg.rows, cfg.cols, goal, list(starts), list(zombies), dict(coins or {}),
                 set(hearts), set(obstacles), 0)
@@ -442,8 +444,8 @@ class DifficultyLevels(unittest.TestCase):
         m = generate_map(cfg, 42)
         self.assertEqual(validate_map(m, cfg), [])
         st = GameState.from_map(cfg, m)
-        self.assertEqual(len(st.blue_cells), 0)
-        self.assertEqual(len(st.pink_cells), 0)
+        self.assertEqual(len(st.blue_cells), 2)
+        self.assertEqual(len(st.pink_cells), 1)
 
     def test_medium_level_properties(self):
         cfg = make_config("medium")
@@ -455,8 +457,8 @@ class DifficultyLevels(unittest.TestCase):
         m = generate_map(cfg, 42)
         self.assertEqual(validate_map(m, cfg), [])
         st = GameState.from_map(cfg, m)
-        self.assertEqual(len(st.blue_cells), 1)
-        self.assertEqual(len(st.pink_cells), 0)
+        self.assertEqual(len(st.blue_cells), 3)
+        self.assertEqual(len(st.pink_cells), 2)
 
     def test_hard_level_properties(self):
         cfg = make_config("hard")
@@ -468,8 +470,8 @@ class DifficultyLevels(unittest.TestCase):
         m = generate_map(cfg, 42)
         self.assertEqual(validate_map(m, cfg), [])
         st = GameState.from_map(cfg, m)
-        self.assertEqual(len(st.blue_cells), 1)
-        self.assertEqual(len(st.pink_cells), 1)
+        self.assertEqual(len(st.blue_cells), 4)
+        self.assertEqual(len(st.pink_cells), 3)
 
     def test_game_starts_and_completes_on_easy_and_medium(self):
         for diff in ("easy", "medium"):
@@ -484,3 +486,5 @@ class DifficultyLevels(unittest.TestCase):
             self.assertIn(g.phase, (Phase.PLAYING, Phase.OVER))
 
 
+if __name__ == "__main__":
+    unittest.main()

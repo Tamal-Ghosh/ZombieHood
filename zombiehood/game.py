@@ -126,7 +126,8 @@ class Game:
             action = agent.choose_action(st, idx)
             events = st.apply(idx, action) if action else None
             if events is None:
-                self.flash = "Blocked - choose another move"
+                self.flash = ("Need %d coins and a zombie in attack range" % st.cfg.coins_to_kill
+                              if action == "ATTACK" else "Blocked - choose another move")
                 return False
         else:
             action = agent.choose_action(st.copy(), idx)
@@ -186,6 +187,9 @@ class Game:
                 self._say("🏃 💨 %s fled with 0 coins!" % loser.name, (240, 195, 90))
                 self._fx("float", pos=e[2], text="FLED! (0 coins)", color=(220, 180, 80))
             elif kind == "hit":
+                for zombie in st.zombies:
+                    if zombie.alive and abs(zombie.pos[0]-e[3][0])+abs(zombie.pos[1]-e[3][1]) == 1:
+                        self._fx("bite", src=zombie.pos, dst=e[3], color=(255,65,65), ttl=450)
                 lost = e[4] if len(e) > 4 else 0
                 if lost > 0:
                     self._say("🧟 🩸 %s was bitten! Lost %d coins & 1 life!" % (s.name, lost), (255, 110, 110))

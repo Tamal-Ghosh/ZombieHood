@@ -1,10 +1,3 @@
-# GLOBAL COMMIT: 26
-# OWNER: Nijhum
-# COMMIT MESSAGE: Add menus overlays and complete UI drawing
-# REPOSITORY DESTINATION: zombiehood/ui.py
-# Cumulative snapshot: replace destination contents with this file.
-# Partial stage; follow GLOBAL_SERIAL.md before running.
-
 """Rendering, HUD and menus matching the exact ZombieHood HTML/SVG UI."""
 import math
 import os
@@ -17,6 +10,7 @@ _CREEPSTER = os.path.join(_BASE_DIR, "Creepster-Regular.ttf")
 _PIXEL     = os.path.join(_BASE_DIR, "PressStart2P-Regular.ttf")
 
 W, H = 1720, 960
+DIALOG_W, DIALOG_H = 1000, 660
 
 INK   = (225, 232, 225)
 DIM   = (155, 187, 187)     # #9bb in HTML
@@ -42,11 +36,27 @@ def lerp(a, b, t):
 class Renderer:
     def __init__(self, screen, cfg):
         self.screen, self.cfg = screen, cfg
-        self.board_w = W - 560
-        self.board_h = H - 160
-        self.cell = self.board_w / max(cfg.rows, cfg.cols)
+        self.board_w = W - 80
+        self.board_h = H - 90
+        self.cell = min(88, self.board_w / max(cfg.rows, cfg.cols))
         self.BX = (W - self.board_w) // 2
-        self.BY = 168
+        self.BY = 115
+        self.board_zoom = 1.0
+        self.board_pan = [0.0, 0.0]
+        self.board_drag = None
+        self.zombie_bounds = []
+        self.agent_images = {}
+        self.agent_frames = {}
+        self.agent_directions = {}
+        self.agent_cache = {}
+        self.agent_steps = {}
+        self.agent_step_state = None
+        self._load_agent_sprites()
+        self.face_images = []
+        self.face_cache = {}
+        self.face_assignments = {}
+        self.face_state = None
+        self._load_zombie_faces()
         self.fonts = {}
         self.buttons = []
         self.menu_mode = "main"        # "main", "select_difficulty", "select_human"
@@ -115,9 +125,9 @@ class Renderer:
     def set_config(self, cfg):
         self.cfg = cfg
         self.chosen_diff = getattr(cfg, "difficulty", "hard")
-        self.board_w = W - 560
-        self.board_h = H - 160
-        self.cell = self.board_w / max(cfg.rows, cfg.cols)
+        self.board_w = W - 80
+        self.board_h = H - 90
+        self.cell = min(88, self.board_w / max(cfg.rows, cfg.cols))
         self.BX = (W - self.board_w) // 2
 
     def cell_rect(self, pos):
@@ -407,7 +417,178 @@ class Renderer:
             pygame.draw.circle(self.screen, (255, 123, 181), (cx + int(0.24 * u), cy - int(0.04 * u)), 4)
             pygame.draw.circle(self.screen, (34, 34, 34), (cx + int(0.24 * u), cy - int(0.04 * u)), 4, 1)
 
-    def sprite_zombie(self, rect):
+    def _load_agent_sprites(self):
+        try:
+            sheet = pygame.image.load(os.path.join(_BASE_DIR,"assets","agent_survivors_upright.png")).convert_alpha()
+            # Source photo order differs from the match's Tamal/Progga/Nijhum order.
+            for i,name in enumerate(("Nijhum","Progga","Tamal")):
+                left = round(sheet.get_width()*i/3)
+                right = round(sheet.get_width()*(i+1)/3)
+                sprite = sheet.subsurface((left,0,right-left,sheet.get_height())).copy()
+                bounds = sprite.get_bounding_rect(min_alpha=20)
+                self.agent_images[name] = sprite.subsurface(bounds).copy()
+        except (pygame.error,OSError):
+            self.agent_images = {}
+
+        try:
+            sheet = pygame.image.load(os.path.join(_BASE_DIR,"assets","agent_walk_frames.png")).convert_alpha()
+            for row,name in enumerate(("Nijhum","Progga","Tamal")):
+                frames = []
+                top,bottom = round(sheet.get_height()*row/3),round(sheet.get_height()*(row+1)/3)
+                for col in range(4):
+                    left,right = round(sheet.get_width()*col/4),round(sheet.get_width()*(col+1)/4)
+                    frame = sheet.subsurface((left,top,right-left,bottom-top)).copy()
+                    frames.append(frame.subsurface(frame.get_bounding_rect(min_alpha=20)).copy())
+                width = max(f.get_width() for f in frames)
+                height = max(f.get_height() for f in frames)
+                aligned = []
+                for frame in frames:
+                    canvas = pygame.Surface((width,height),pygame.SRCALPHA)
+                    canvas.blit(frame,frame.get_rect(midbottom=(width//2,height)))
+                    aligned.append(canvas)
+                self.agent_frames[name] = aligned
+        except (pygame.error,OSError):
+            self.agent_frames = {}
+
+        for name in ("Nijhum","Progga","Tamal"):
+            try:
+                sheet = pygame.image.load(os.path.join(_BASE_DIR,"assets",f"agent_directions_{name.lower()}.png")).convert_alpha()
+                rows = {}
+                for row,direction in enumerate(("RIGHT","DOWN","UP","LEFT")):
+                    frames = []
+                    top,bottom = round(sheet.get_height()*row/4),round(sheet.get_height()*(row+1)/4)
+                    for col in range(4):
+                        left,right = round(sheet.get_width()*col/4),round(sheet.get_width()*(col+1)/4)
+                        frame = sheet.subsurface((left,top,right-left,bottom-top)).copy()
+                        components = pygame.mask.from_surface(frame,100).connected_components(20)
+                        # Select the central character, excluding detached generation artifacts.
+                        component = max(components,key=lambda m:m.count()/(1+abs(m.get_bounding_rects()[0].centerx-frame.get_width()/2)/frame.get_width()*4))
+                        bounds = component.get_bounding_rects()[0]
+                        frames.append(frame.subsurface(bounds).copy())
+                    rows[direction] = frames
+                # One scale and root across the whole turn/walk sheet.
+                width = max(f.get_width() for frames in rows.values() for f in frames)
+                height = max(f.get_height() for frames in rows.values() for f in frames)
+                for direction,frames in rows.items():
+                    aligned = []
+                    for frame in frames:
+                        canvas = pygame.Surface((width,height),pygame.SRCALPHA)
+                        canvas.blit(frame,frame.get_rect(midbottom=(width//2,height)))
+                        aligned.append(canvas)
+                    rows[direction] = aligned
+                self.agent_directions[name] = rows
+            except (pygame.error,OSError,ValueError):
+                continue
+
+    def draw_agent_sprite(self, survivor, rect, portrait=False, t=None):
+        source = self.agent_images.get(survivor.name)
+        if source is None:
+            return False
+        frame_index = -1
+        facing = getattr(survivor,"facing","RIGHT")
+        feet = rect.midbottom
+        if not portrait:
+            frame_index = 1
+            step = self.agent_steps.get(survivor.name)
+            if step is None:
+                step = dict(pos=survivor.pos,origin=survivor.pos,started=None,leg=0)
+                self.agent_steps[survivor.name] = step
+            if step["pos"] != survivor.pos:
+                step.update(origin=step["pos"],pos=survivor.pos,started=t,leg=2 if step["leg"]==0 else 0)
+            if t is not None and step["started"] is not None:
+                progress = max(0,min(1,(t-step["started"])/360))
+                if progress < 1:
+                    # Exactly one footfall per cell: passing, one extended leg, passing.
+                    frame_index = step["leg"] if .2 <= progress < .8 else 1
+                    start = self.board_point(step["origin"][0]+.5,step["origin"][1]+.5,4)
+                    feet = (round(start[0]+(feet[0]-start[0])*progress),
+                            round(start[1]+(feet[1]-start[1])*progress-math.sin(progress*math.pi)*2))
+            if survivor.reached_goal:
+                # Show the original front-facing portrait pose upon reaching the exit.
+                frame_index = -1
+                facing = "goal_front"
+                source = self.agent_images[survivor.name]
+                feet = rect.midbottom
+            elif survivor.name in self.agent_directions:
+                source = self.agent_directions[survivor.name][facing][frame_index]
+            elif survivor.name in self.agent_frames:
+                source = self.agent_frames[survivor.name][frame_index]
+        key = (survivor.name,rect.width,rect.height,portrait,frame_index,facing if not portrait else "portrait")
+        if key not in self.agent_cache:
+            if portrait:
+                head = source.subsurface((0,0,source.get_width(),round(source.get_height()*.34)))
+                scale = min(rect.width/head.get_width(),rect.height/head.get_height())
+                image = pygame.transform.smoothscale(head,(max(1,round(head.get_width()*scale)),max(1,round(head.get_height()*scale))))
+            else:
+                scale = min(rect.width/source.get_width(),rect.height/source.get_height())
+                image = pygame.transform.smoothscale(source,(max(1,round(source.get_width()*scale)),max(1,round(source.get_height()*scale))))
+            self.agent_cache[key] = image
+        image = self.agent_cache[key]
+        self.screen.blit(image,image.get_rect(center=rect.center) if portrait else image.get_rect(midbottom=feet))
+        return True
+
+    def _load_zombie_faces(self):
+        sheet_path = os.path.join(_BASE_DIR, "assets", "zombie_fullbody.png")
+        try:
+            sheet = pygame.image.load(sheet_path).convert_alpha()
+            for i in range(5):
+                left = round(i * sheet.get_width() / 5)
+                right = round((i + 1) * sheet.get_width() / 5)
+                sprite = sheet.subsurface((left, 0, right-left, sheet.get_height())).copy()
+                bounds = sprite.get_bounding_rect(min_alpha=20)
+                self.face_images.append(sprite.subsurface(bounds).copy())
+        except (pygame.error, OSError):
+            self.face_images = []
+
+    def _assign_zombie_faces(self, state):
+        if self.face_state is state:
+            return
+        self.face_state = state
+        self.face_assignments = {}
+        if not self.face_images:
+            return
+        rng = random.Random(state.seed if hasattr(state, "seed") else None)
+        bag = []
+        for zombie in state.zombies:
+            if not bag:
+                bag = list(range(len(self.face_images)))
+                rng.shuffle(bag)
+            self.face_assignments[zombie.id] = bag.pop()
+
+    def _draw_zombie_body(self, pos, size, zombie_id, t=0):
+        index = self.face_assignments[zombie_id]
+        height = max(52, round(size * 2.5))
+        source = self.face_images[index]
+        width = round(source.get_width()*height/source.get_height())
+        phase = int((t/110+zombie_id*2.3)%24)
+        key = ("whole",index,width,height,phase)
+        if key not in self.face_cache:
+            # One intact image: no cut seams at the neck, shoulders or hands.
+            # Oversample before rotation so facial features do not blur repeatedly.
+            quality = 3
+            sprite = pygame.transform.smoothscale(source,(width*quality,height*quality))
+            sprite.fill((24,24,16,0),special_flags=pygame.BLEND_RGB_ADD)
+            sway = math.sin(phase*math.tau/24)
+            support_x = round(-width*.20 if sway>=0 else width*.20)
+            pivot = (width*quality//2+support_x*quality,height*quality-2*quality)
+            canvas = pygame.Surface((height*quality*3,height*quality*3),pygame.SRCALPHA)
+            center = canvas.get_width()//2
+            canvas.blit(sprite,(center-pivot[0],center-pivot[1]))
+            rotated = pygame.transform.rotozoom(canvas,sway*10,1)
+            # Downsample once, after rotation, preserving the original complete silhouette.
+            frame = pygame.transform.smoothscale(rotated,
+                         (round(rotated.get_width()/quality),round(rotated.get_height()/quality)))
+            bounds = frame.get_bounding_rect(min_alpha=1)
+            image = frame.subsurface(bounds).copy()
+            anchor = (frame.get_width()//2-bounds.x-support_x,
+                      frame.get_height()//2-bounds.y+2)
+            self.face_cache[key] = (image,anchor)
+        image,anchor = self.face_cache[key]
+        x,y = self.board_point(pos[0]+.5,pos[1]+.5,4)
+        self.screen.blit(image,(x-anchor[0],y-anchor[1]))
+        self.zombie_bounds.append(pygame.Rect(x-width//2,y-height,width,height))
+
+    def sprite_zombie(self, rect, zombie_id=None):
         """Zombie head sprite matching the detailed HTML SVG."""
         cx, cy, u = rect.centerx, rect.centery, rect.width
         r = int(0.36 * u)
@@ -663,13 +844,19 @@ class Renderer:
             pygame.draw.circle(self.screen, (34, 34, 34), body.center, 3)
 
     # ------------------------------------------------------------ main board
+    def pickup_rect(self, pos, size):
+        return self.piece_rect(pos, size, 3)
+
     def board_point(self, row, col, height=0):
         """Orthographic 3D projection, shared by tiles, pieces and effects."""
         sx = self.board_w / (self.cfg.rows + self.cfg.cols)
         sy = (self.board_h - 100) / (self.cfg.rows + self.cfg.cols)
         left = self.BX + self.cfg.rows * sx
-        return (round(left + (col - row) * sx),
-                round(self.BY + 40 + (row + col) * sy - height))
+        px = left + (col-row)*sx
+        py = self.BY+40+(row+col)*sy
+        cx, cy = W/2, self.BY+40+(self.board_h-100)/2
+        return (round(cx+(px-cx)*self.board_zoom+self.board_pan[0]),
+                round(cy+(py-cy)*self.board_zoom+self.board_pan[1]-height))
 
     def tile_polygon(self, pos, height=0, inset=0.035):
         r, c = pos
@@ -695,7 +882,11 @@ class Renderer:
         return pygame.Rect(x-size//2, y-size, size, size)
 
     def draw_board(self, game, t):
+        self.zombie_bounds = []
         st = game.state
+        if self.agent_step_state is not st:
+            self.agent_step_state = st
+            self.agent_steps = {}
         # Thick board plinth with two shaded faces and a cast shadow.
         corners = [self.board_point(r, c) for r, c in
                    ((0, 0), (0, self.cfg.cols),
@@ -710,7 +901,9 @@ class Renderer:
         pygame.draw.polygon(self.screen, BOARD_BORDER, corners, 3)
 
         # Paint ground first so a front tile never covers a standing piece.
+        self._assign_zombie_faces(st)
         zombies = {z.pos: z for z in st.zombies if z.alive}
+        agent_tiles = {sv.pos: sv.color for sv in st.survivors if sv.alive}
         for r in range(self.cfg.rows):
             for c in range(self.cfg.cols):
                 pos = (r, c)
@@ -719,12 +912,14 @@ class Renderer:
                     col = TILE_ZOMBIE
                 elif pos in st.buried_cells:
                     col = (45, 29, 35)
+                elif pos in agent_tiles:
+                    col = agent_tiles[pos]
                 self.board_block(pos, 3, col)
-                outline = ((74, 163, 255) if pos in st.blue_cells else
-                           (255, 123, 181) if pos in st.pink_cells else None)
-                if outline:
-                    pygame.draw.polygon(self.screen, outline,
-                                        self.tile_polygon(pos, 4, 0.13), 2)
+                border = ((74, 163, 255) if pos in st.blue_cells else
+                          (255, 123, 181) if pos in st.pink_cells else None)
+                if border:
+                    pygame.draw.polygon(self.screen, border,
+                                        self.tile_polygon(pos, 4, 0.08), 2)
 
         unlocked = [sv for sv in st.survivors if sv.alive and st.goal_unlocked_for(sv)]
         # Back-to-front painter order for raised objects on the ground plane.
@@ -741,10 +936,9 @@ class Renderer:
                 pygame.draw.line(self.screen, (166, 183, 183), top[0], top[2], 2)
                 pygame.draw.line(self.screen, (40, 55, 64), top[1], top[3], 2)
             if pos in st.coins:
-                rect = self.piece_rect(pos, size, 3)
-                self.sprite_coin(rect, st.coins[pos])
+                self.sprite_coin(self.pickup_rect(pos, size), st.coins[pos])
             if pos in st.hearts:
-                self.sprite_heart_pickup(self.piece_rect(pos, size, 3))
+                self.sprite_heart_pickup(self.pickup_rect(pos, size))
             if pos == st.goal:
                 color = (90, 235, 120) if unlocked else (255, 138, 31)
                 pygame.draw.polygon(self.screen, color, self.tile_polygon(pos, 5, 0.08), 2)
@@ -755,13 +949,20 @@ class Renderer:
             pieces += [(sv, False) for sv in survivors.get(pos, [])]
             for sv, zombie in pieces:
                 color = (127, 184, 90) if zombie else sv.color
-                if sv and sv.alive and st.turn == sv.idx and game.phase == Phase.PLAYING:
-                    pygame.draw.polygon(self.screen, color,
-                                        self.tile_polygon(pos, 5, 0.08), 2)
                 pygame.draw.ellipse(self.screen, (9, 17, 19), (x-size//2, y-4, size, 9))
                 if sv and not sv.alive:
                     self.sprite_soldier(self.piece_rect(pos, size, 4), color, dead=True)
                     continue
+                if zombie and zombies[pos].id in self.face_assignments:
+                    self._draw_zombie_body(pos, size, zombies[pos].id, t)
+                    continue
+                if sv and sv.alive:
+                    agent_rect = pygame.Rect(0,0,round(size*1.5),round(size*2.35))
+                    agent_rect.midbottom = (x,y)
+                    if self.draw_agent_sprite(sv,agent_rect,t=t if game.phase == Phase.PLAYING else None):
+                        if sv.reached_goal:
+                            self.text("WINNER!",11,GOLD,(x,agent_rect.top-8),"center")
+                        continue
                 # Pawn body and shaded base anchor the original avatars in space.
                 pygame.draw.ellipse(self.screen, lerp((0, 0, 0), color, 0.4),
                                     (x-size//3, y-6, size*2//3, 9))
@@ -770,7 +971,7 @@ class Renderer:
                                      (x+size//5, y-size), (x+size//4, y-5)])
                 rect = self.piece_rect(pos, size, size*0.45)
                 if zombie:
-                    self.sprite_zombie(rect)
+                    self.sprite_zombie(rect, zombies[pos].id)
                 else:
                     self.sprite_soldier(rect, color, is_female=sv.female)
                     self.text(sv.name[0], 10, color, (x+size//2, y-5), "bottomleft")
@@ -779,10 +980,10 @@ class Renderer:
 
         for fx in game.effects:
             k = 1.0 - fx["ttl"] / fx["total"]
-            if fx["kind"] == "shot":
+            if fx["kind"] in ("shot", "bite"):
                 a = self.board_point(fx["src"][0]+0.5, fx["src"][1]+0.5, 20)
                 b = self.board_point(fx["dst"][0]+0.5, fx["dst"][1]+0.5, 20)
-                pygame.draw.line(self.screen, (255, 255, 200), a, b, 4)
+                pygame.draw.line(self.screen, (255, 180, 170) if fx["kind"] == "bite" else (255, 255, 200), a, b, 4)
                 pygame.draw.line(self.screen, fx["color"], a, b, 2)
                 pygame.draw.circle(self.screen, (255, 120, 60), b, int(6+14*k), 2)
             else:
@@ -816,12 +1017,21 @@ class Renderer:
                       15, DIM, (W - 16, 10), "topright", bold=False)
 
     def draw_cards(self, game, t):
+        ranked = sorted(game.state.survivors, key=lambda sv: (-sv.score, -sv.lives))
+        ranks = {sv.idx: 1 + sum(other.score > sv.score for other in ranked) for sv in ranked}
         for i, sv in enumerate(game.state.survivors):
-            rect = pygame.Rect(24, 150 + i * 116, 240, 106)
+            card_positions = {"Tamal": (16,120), "Progga": (16,226), "Nijhum": (242,120)}
+            card_x, card_y = card_positions.get(sv.name,(16,120+i*106))
+            rect = pygame.Rect(card_x,card_y,214,100)
             active = game.state.turn == sv.idx and sv.alive
             self.panel(rect, border=sv.color if active else PANEL_BORDER, width=3 if active else 2)
-            self.sprite_soldier(pygame.Rect(rect.x + 10, rect.y + 10, 40, 40), sv.color, is_female=sv.female, dead=not sv.alive)
+            portrait_rect = pygame.Rect(rect.x+5,rect.y+7,48,48)
+            if not self.draw_agent_sprite(sv,portrait_rect,portrait=True):
+                self.sprite_soldier(portrait_rect,sv.color,is_female=sv.female,dead=not sv.alive)
             self.text(sv.name, 22, sv.color, (rect.x + 60, rect.y + 8))
+            self.text("#%d" % ranks[sv.idx], 20, GOLD, (rect.right-10,rect.y+10), "topright")
+            if sv.idx == game.human_idx:
+                self.text("YOU",11,GREEN,(rect.x+28,rect.y+52),"center")
             for h in range(sv.max_lives):
                 self.sprite_heart(pygame.Rect(rect.x + 60 + h * 22, rect.y + 36, 19, 19), shine=h < sv.lives)
             self.text("Score %d   Kills %d" % (sv.score, sv.kills), 17, GOLD, (rect.x + 12, rect.y + 60))
@@ -829,52 +1039,55 @@ class Renderer:
             self.text("Coins %d/%d" % (sv.coins, self.cfg.coins_to_kill), 16, INK, (rect.x + 12, rect.y + 83))
             self.text(status, 14, GREEN if status == "READY" else sv.color, (rect.right - 10, rect.y + 84), "topright")
 
-    def button(self, label, action, rect, border_color=None):
+    def button(self, label, action, rect, border_color=None, font_size=17):
         mouse = getattr(self, "mouse_pos", pygame.mouse.get_pos())
         hover = rect.collidepoint(mouse)
         bg = (35, 50, 72) if hover else PANEL_BG
         border = (120, 160, 210) if hover else (border_color or PANEL_BORDER)
         pygame.draw.rect(self.screen, bg, rect, border_radius=6)
         pygame.draw.rect(self.screen, border, rect, 2, border_radius=6)
-        self.text(label, 17, INK, rect.center, "center", bold=True)
+        self.text(label, font_size, INK, rect.center, "center", bold=True)
         self.buttons.append((rect, action))
 
     def draw_bottom_bar(self, game):
-        x = W - 264
-        self.panel(pygame.Rect(x, 170, 240, 430), width=2)
-        self.text("EVENT LOG", 26, GOLD, (x + 16, 186), title=True)
-        y = 225
-        for line, color in reversed(game.log[-5:]):
-            words = str(line).split()
+        x = W - 246
+        self.panel(pygame.Rect(x, 130, 230, 255), width=2)
+        self.text("EVENT LOG", 24, GOLD, (x+12,142), title=True)
+        y = 178
+        for line,color in reversed(game.log[-3:]):
             wrapped = ""
-            for word in words:
-                candidate = (wrapped + " " + word).strip()
-                if self.font(16).size(candidate)[0] > 208 and wrapped:
-                    self.text(wrapped, 16, color, (x + 16, y))
-                    y += 22
+            for word in str(line).split():
+                candidate = (wrapped+" "+word).strip()
+                if self.font(14).size(candidate)[0] > 204 and wrapped:
+                    if y <= 357:
+                        self.text(wrapped,14,color,(x+12,y))
+                    y += 19
                     wrapped = word
                 else:
                     wrapped = candidate
-            self.text(wrapped, 16, color, (x + 16, y))
-            y += 32
-            if y > 560:
-                break
-        self.text("MATCH CONTROLS", 26, GOLD, (x + 16, 625), title=True)
+            if y <= 357:
+                self.text(wrapped,14,color,(x+12,y))
+            y += 27
+        self.text("MATCH CONTROLS",24,GOLD,(x+10,710),title=True)
         labels = [("Resume [P]" if game.phase == Phase.PAUSED else "Pause [P]", "pause"),
                   ("Restart [R]", "restart"), ("New Map [N]", "new"), ("Menu [M]", "menu")]
-        for i, (label, action) in enumerate(labels):
-            self.button(label, action, pygame.Rect(x, 660 + i * 52, 240, 42))
-        self.text("WASD / Arrows: move", 16, DIM, (x + 12, 880))
-        self.text("Space: shoot  |  Z: wait", 16, DIM, (x + 12, 902))
-
-        self.panel(pygame.Rect(24, 515, 240, 300), width=2)
-        self.text("SURVIVAL OBJECTIVE", 26, GOLD, (40, 535), title=True)
-        self.text("Collect %d coins to shoot" % self.cfg.coins_to_kill, 16, INK, (40, 575))
-        self.text("Kill %d zombie(s) to unlock" % self.cfg.kills_to_unlock, 16, INK, (40, 600))
-        self.text("Reach the exit alive", 16, GREEN, (40, 625))
-        self.text("LEADERBOARD", 26, GOLD, (40, 670), title=True)
-        for i, sv in enumerate(sorted(game.state.survivors, key=lambda s: s.score, reverse=True)):
-            self.text("%d. %s   %d pts" % (i + 1, sv.name, sv.score), 18, sv.color, (40, 710 + i * 28))
+        for i,(label,action) in enumerate(labels):
+            self.button(label,action,pygame.Rect(x,745+i*43,230,35))
+        if game.human_idx is not None:
+            human = game.state.survivors[game.human_idx]
+            your_turn = game.state.turn == game.human_idx and human.alive
+            if not human.alive:
+                heading = "YOU DIED - Watching remaining AIs"
+            elif game.goal_delay_ms > 0:
+                heading = "Goal reached - match ending"
+            else:
+                heading = "YOUR TURN - "+human.name if your_turn else "AI TURN - "+game.state.survivors[game.state.turn].name
+            self.panel(pygame.Rect(16,H-131,440,65),border=GREEN if your_turn else PANEL_BORDER,width=2)
+            self.text(heading,20,GREEN if your_turn else INK,(28,H-122))
+            self.text(game.flash or ("WASD / Arrows: move | Space: attack | Z: wait" if your_turn else "Please wait for your turn"),16,
+                      (255,140,120) if game.flash else DIM,(28,H-94))
+        self.text("WASD: move   Space: shoot",13,DIM,(16,H-55))
+        self.text("Z: wait   F11: fullscreen",13,DIM,(16,H-33))
 
     def dim(self, a=180):
         s = pygame.Surface((W, H), pygame.SRCALPHA)
@@ -883,19 +1096,19 @@ class Renderer:
 
     def draw_menu(self):
         self.dim(200)
-        box_w, box_h = 700, 520
+        box_w, box_h = DIALOG_W, DIALOG_H
         box = pygame.Rect((W - box_w) // 2, (H - box_h) // 2, box_w, box_h)
         self.panel(box, bg=PANEL_BG, border=PANEL_BORDER, width=3, radius=10)
 
         cx = box.centerx
         # Horror title using Creepster
-        self.text("ZombieHood", 68, (90, 13, 16), (cx + 3, box.y + 44), "center", title=True)
-        self.text("ZombieHood", 68, RED, (cx, box.y + 42), "center", title=True)
+        self.text("ZombieHood", 78, (90, 13, 16), (cx + 3, box.y + 58), "center", title=True)
+        self.text("ZombieHood", 78, RED, (cx, box.y + 56), "center", title=True)
 
         if self.menu_mode == "select_difficulty":
-            self.text("SELECT DIFFICULTY", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+            self.text("SELECT DIFFICULTY", 30, (214, 220, 207), (cx, box.y + 122), "center", title=True)
             subtitle = "AI VS AI BATTLEFIELD SELECTION" if self.chosen_mode == "ai" else "CHOOSE YOUR SURVIVAL CHALLENGE"
-            self.text(subtitle, 16, GOLD, (cx, box.y + 138), "center", title=True)
+            self.text(subtitle, 22, GOLD, (cx, box.y + 174), "center", title=True)
 
             diff_opts = [
                 ("🟢 Easy    - 10x10 Grid • 3 Lives • 10 Coins to Kill  [1]", "diff_easy", GREEN),
@@ -903,34 +1116,34 @@ class Renderer:
                 ("🔴 Hard    - 15x15 Grid • 1 Life  • 20 Coins to Kill  [3]", "diff_hard", (255, 95, 95)),
             ]
             for i, (lab, act, col) in enumerate(diff_opts):
-                r = pygame.Rect(cx - 240, box.y + 185 + i * 62, 480, 48)
-                self.button(lab, act, r, border_color=col)
+                r = pygame.Rect(cx - 430, box.y + 224 + i * 82, 860, 64)
+                self.button(lab, act, r, border_color=col, font_size=25)
 
-            self.button("<- Back to Mode Select  [ESC]", "menu_main", pygame.Rect(cx - 150, box.y + 395, 300, 42))
-            self.text("Keys: 1 Easy   2 Medium   3 Hard   |   ESC / B Back",
-                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+            self.button("<- Back to Mode Select  [B]", "menu_main", pygame.Rect(cx - 250, box.y + 514, 500, 58), font_size=24)
+            self.text("Keys: 1 Easy   2 Medium   3 Hard   |   B / Backspace: Back",
+                      18, DIM, (cx, box.bottom - 30), "center", bold=False)
 
         elif self.menu_mode == "select_human":
-            self.text("SELECT YOUR SURVIVOR", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+            self.text("SELECT YOUR SURVIVOR", 30, (214, 220, 207), (cx, box.y + 122), "center", title=True)
             grid_sz = 10 if self.chosen_diff == "easy" else (12 if self.chosen_diff == "medium" else 15)
             self.text("DIFFICULTY: %s (%dx%d) • TAKE CONTROL OF A SURVIVOR" % (self.chosen_diff.upper(), grid_sz, grid_sz),
-                      16, GOLD, (cx, box.y + 138), "center", title=True)
+                      22, GOLD, (cx, box.y + 174), "center", title=True)
 
             survivors_info = [
                 ("Play as Tamal   (MCTS Agent)   [1]", "h0", (74, 163, 255)),
                 ("Play as Progga  (Fuzzy Logic)  [2]", "h1", (255, 123, 181)),
-                ("Play as Nijhum  (Minimax)      [3]", "h2", (255, 184, 74)),
+                ("Play as Nijhum  (A* Search)    [3]", "h2", (255, 184, 74)),
             ]
             for i, (lab, act, col) in enumerate(survivors_info):
-                r = pygame.Rect(cx - 190, box.y + 195 + i * 58, 380, 46)
-                self.button(lab, act, r, border_color=col)
+                r = pygame.Rect(cx - 430, box.y + 224 + i * 82, 860, 64)
+                self.button(lab, act, r, border_color=col, font_size=25)
 
-            self.button("<- Back to Difficulty Select  [ESC]", "menu_diff", pygame.Rect(cx - 160, box.y + 395, 320, 42))
-            self.text("Keys: 1 Tamal   2 Progga   3 Nijhum   |   ESC / B Back",
-                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+            self.button("<- Back to Difficulty Select  [B]", "menu_diff", pygame.Rect(cx - 250, box.y + 514, 500, 58), font_size=24)
+            self.text("Keys: 1 Tamal   2 Progga   3 Nijhum   |   B / Backspace: Back",
+                      18, DIM, (cx, box.bottom - 30), "center", bold=False)
 
         else:
-            self.text("THE LAST ALIVE", 22, (214, 220, 207), (cx, box.y + 96), "center", title=True)
+            self.text("THE LAST ALIVE", 30, (214, 220, 207), (cx, box.y + 122), "center", title=True)
 
             # Enhanced, large, clear horror-style rules text
             lines = [
@@ -940,7 +1153,7 @@ class Renderer:
                 ("KILL AT LEAST 1 ZOMBIE TO UNLOCK THE EXIT GOAL!", GREEN),
             ]
             for i, (ln, col) in enumerate(lines):
-                self.text(ln, 17, col, (cx, box.y + 138 + i * 28), "center", title=True)
+                self.text(ln, 24, col, (cx, box.y + 182 + i * 40), "center")
 
             # 2 Main Modes
             opts = [
@@ -948,48 +1161,48 @@ class Renderer:
                 ("AI vs Human  (Play Survivor)  [ENTER]", "choose_diff_human"),
             ]
             for i, (lab, act) in enumerate(opts):
-                self.button(lab, act, pygame.Rect(cx - 190, box.y + 276 + i * 62, 380, 48))
+                self.button(lab, act, pygame.Rect(cx - 350, box.y + 378 + i * 84, 700, 64), font_size=26)
 
-            self.text("Select Mode with mouse or SPACE (AI vs AI) / ENTER (AI vs Human)  |  ESC Quit",
-                      12, DIM, (cx, box.bottom - 22), "center", bold=False)
+            self.text("Select Mode with mouse or SPACE (AI vs AI) / ENTER (AI vs Human)  |  ESC: Window mode",
+                      18, DIM, (cx, box.bottom - 30), "center", bold=False)
 
     def draw_pause(self):
-        self.dim(140)
-        bx = self.BX + self.board_w // 2
-        by = self.BY + self.board_h // 2
-        self.text("PAUSED", 62, INK, (bx, by - 20), "center", title=True)
-        self.text("press P to resume", 15, DIM, (bx, by + 34), "center", bold=False)
+        self.dim(170)
+        box = pygame.Rect((W-DIALOG_W)//2,(H-DIALOG_H)//2,DIALOG_W,DIALOG_H)
+        self.panel(box,bg=PANEL_BG,border=PANEL_BORDER,width=3,radius=10)
+        self.text("PAUSED",78,INK,(box.centerx,box.centery-45),"center",title=True)
+        self.text("Press P to resume",26,DIM,(box.centerx,box.centery+35),"center")
 
     def draw_over(self, game):
         self.dim(190)
         o = game.outcome
-        box_w, box_h = 560, 380
+        box_w, box_h = DIALOG_W, DIALOG_H
         box = pygame.Rect((W - box_w) // 2, (H - box_h) // 2, box_w, box_h)
         col = RED if o["title"] == "DEFEAT" else (GOLD if "DRAW" in o["title"] else GREEN)
         self.panel(box, bg=PANEL_BG, border=col, width=3, radius=10)
 
         cx = box.centerx
         # Horror title for Game Over / Defeat
-        self.text(o["title"], 50, col, (cx, box.y + 38), "center", title=True)
+        self.text(o["title"], 68, col, (cx, box.y + 52), "center", title=True)
 
         words, line = o["detail"].split(), ""
-        y = box.y + 86
+        y = box.y + 112
         for w in words:
-            if self.font(13, bold=False).size(line + w)[0] > box.width - 50:
-                self.text(line, 13, INK, (cx, y), "center", bold=False)
-                line, y = "", y + 20
+            if self.font(22, bold=False).size(line + w)[0] > box.width - 50:
+                self.text(line, 22, INK, (cx, y), "center", bold=False)
+                line, y = "", y + 30
             line += w + " "
-        self.text(line, 13, INK, (cx, y), "center", bold=False)
+        self.text(line, 22, INK, (cx, y), "center", bold=False)
 
-        self.text("FINAL STANDINGS", 12, DIM, (box.x + 36, y + 28), bold=True)
+        self.text("FINAL STANDINGS", 22, DIM, (box.x + 36, y + 44), bold=True)
         for i, sv in enumerate(o["ranking"]):
             tag = "escaped" if sv.reached_goal else ("dead" if not sv.alive else "alive")
             self.text("%d. %-7s %4d pts   coins %-2d   kills %d   (%s)" % (
                 i + 1, sv.name, sv.score, sv.coins, sv.kills, tag),
-                13, sv.color, (box.x + 36, y + 52 + i * 24), bold=True)
+                24, sv.color, (box.x + 36, y + 84 + i * 44), bold=True)
 
         for i, (lab, act) in enumerate([("Restart [R]", "restart"), ("New Map [N]", "new"), ("Menu [M]", "menu")]):
-            self.button(lab, act, pygame.Rect(box.x + 24 + i * 174, box.bottom - 52, 160, 38))
+            self.button(lab, act, pygame.Rect(box.x + 36 + i * 316, box.bottom - 90, 296, 62), font_size=23)
 
     # ------------------------------------------------------------ main draw loop
     def draw(self, game):
@@ -1012,9 +1225,9 @@ class Renderer:
             self.draw_menu()
             return
 
+        self.draw_board(game, t)
         self.draw_header(game)
         self.draw_cards(game, t)
-        self.draw_board(game, t)
         self.draw_bottom_bar(game)
 
         if game.phase == Phase.MENU:

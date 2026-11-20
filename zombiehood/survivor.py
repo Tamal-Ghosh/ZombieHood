@@ -1,3 +1,4 @@
+"""Survivor state and small actions (lives, score)."""
 from dataclasses import dataclass
 
 
@@ -19,6 +20,7 @@ class Survivor:
     alive: bool = True
     human: bool = False
     reached_goal: bool = False
+    facing: str = "RIGHT"
 
     def copy(self):
         c = Survivor.__new__(Survivor)
@@ -26,12 +28,14 @@ class Survivor:
         return c
 
     def gain_life(self):
+        """+1 life, capped at ``max_lives``.  Returns True if it counted."""
         if self.lives >= self.max_lives:
             return False
         self.lives += 1
         return True
 
     def lose_life(self, n=1):
+        """Lose ``n`` lives; at zero lives the survivor dies."""
         self.lives = max(0, self.lives - n)
         if self.lives == 0:
             self.alive = False

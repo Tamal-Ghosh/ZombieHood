@@ -7,6 +7,7 @@ game logic reads module-level globals.
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+# The three competing survivors.  ``algo`` selects the AI implementation.
 AGENTS = (
     {"name": "Tamal", "algo": "mcts", "label": "Monte Carlo Tree Search",
      "color": (74, 163, 255), "female": False},
@@ -16,38 +17,46 @@ AGENTS = (
      "color": (255, 184, 74), "female": False},
 )
 
+
 @dataclass
 class Config:
     difficulty: str = "hard"
-
+    # --- map ---------------------------------------------------------
     rows: int = 15
     cols: int = 15
-    seed: Optional[int] = None
-    goal: Tuple[int, int] = (7, 7)
+    seed: Optional[int] = None          # None -> random map every game
+    goal: Tuple[int, int] = (7, 7)      # (row, col) of the locked goal
     zombie_count: int = 10
-    heart_count: int = 5
-    obstacle_count: int = 9
-
+    heart_count: int = 5                # +1 life pickups
+    blue_cell_count: int = 4
+    pink_cell_count: int = 3
+    obstacle_count: int = 9             # 8-10 blocked cells (steel boxes)
+    # 15 coins across 15 rows (sum = 64, <= 65)
     coin_values: Tuple[int, ...] = (3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 7, 8)
-    high_coin_value: int = 7
+    high_coin_value: int = 7            # coins >= this go near zombies
 
+    # --- survivors ---------------------------------------------------
     start_lives: int = 1
     max_lives: int = 3
     agents: tuple = AGENTS
 
-    attack_range: int = 2
-    zombie_damage: int = 1
+    # --- combat / scoring -------------------------------------------
+    attack_range: int = 2               # Manhattan distance of a shot
+    zombie_damage: int = 1              # lives lost per adjacent zombie
     zombie_kill_score: int = 20
-    coin_multiplier: int = 1
-    kills_to_unlock: int = 1
-    coins_to_kill: int = 20
+    coin_multiplier: int = 1            # reward = coin value * multiplier
+    kills_to_unlock: int = 1            # kills needed to unlock the goal
+    coins_to_kill: int = 20             # coins needed to kill a zombie
 
-    max_rounds: int = 250
-    step_delay_ms: int = 260
+    # --- match flow --------------------------------------------------
+    max_rounds: int = 250               # safety stop (time-up)
+    step_delay_ms: int = 420            # pause between AI actions
 
+    # --- AI strength -------------------------------------------------
     minimax_depth: int = 4
     mcts_iterations: int = 60
-    mcts_time_limit: float = 0.02
+    mcts_time_limit: float = 0.02       # seconds per decision
+
 
 def make_config(difficulty: str = "hard", seed: Optional[int] = None) -> Config:
     """Create a balanced preset config for Easy (10x10), Medium (12x12), or Hard (15x15)."""
@@ -55,6 +64,8 @@ def make_config(difficulty: str = "hard", seed: Optional[int] = None) -> Config:
     if diff == "easy":
         return Config(
             difficulty="easy",
+            blue_cell_count=2,
+            pink_cell_count=1,
             rows=10,
             cols=10,
             seed=seed,
@@ -73,6 +84,8 @@ def make_config(difficulty: str = "hard", seed: Optional[int] = None) -> Config:
     elif diff == "medium":
         return Config(
             difficulty="medium",
+            blue_cell_count=3,
+            pink_cell_count=2,
             rows=12,
             cols=12,
             seed=seed,
@@ -88,7 +101,7 @@ def make_config(difficulty: str = "hard", seed: Optional[int] = None) -> Config:
             coins_to_kill=15,
             max_rounds=200,
         )
-    else:
+    else:  # hard (default)
         return Config(
             difficulty="hard",
             rows=15,
@@ -106,5 +119,6 @@ def make_config(difficulty: str = "hard", seed: Optional[int] = None) -> Config:
             coins_to_kill=20,
             max_rounds=250,
         )
+
 
 DEFAULT = Config()

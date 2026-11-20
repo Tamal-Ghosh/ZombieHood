@@ -1,10 +1,3 @@
-# GLOBAL COMMIT: 27
-# OWNER: Nijhum
-# COMMIT MESSAGE: Add launcher input mapping and display scaling
-# REPOSITORY DESTINATION: zombiehood/main.py
-# Cumulative snapshot: replace destination contents with this file.
-# Partial stage; follow GLOBAL_SERIAL.md before running.
-
 """ZombieHood - The Last Rise.   Run:  python main.py [--seed N] [--human NAME]"""
 import argparse
 import sys
@@ -72,7 +65,9 @@ def main():
     pygame.display.set_caption("ZombieHood - The Last Rise")
     desktop_w, desktop_h = pygame.display.get_desktop_sizes()[0]
     scale = min(1.0, (desktop_w - 80) / W, (desktop_h - 120) / H)
-    window = pygame.display.set_mode((int(W * scale), int(H * scale)), pygame.RESIZABLE)
+    windowed_size = (int(W * scale), int(H * scale))
+    fullscreen = False
+    window = pygame.display.set_mode(windowed_size, pygame.RESIZABLE)
     screen = pygame.Surface((W, H))
 
     def viewport():
@@ -95,6 +90,10 @@ def main():
 
     while True:
         for e in pygame.event.get():
+            if e.type == pygame.KEYDOWN and e.key == pygame.K_F11:
+                fullscreen = not fullscreen
+                window = pygame.display.set_mode((desktop_w,desktop_h) if fullscreen else windowed_size,
+                                                  pygame.NOFRAME if fullscreen else pygame.RESIZABLE)
             if e.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
@@ -107,15 +106,10 @@ def main():
                 continue
             k = e.key
             if k == pygame.K_ESCAPE:
-                if game.phase == Phase.MENU:
-                    if ui.menu_mode == "select_human":
-                        run_action(game, ui, "menu_diff")
-                        continue
-                    elif ui.menu_mode == "select_difficulty":
-                        run_action(game, ui, "menu_main")
-                        continue
-                pygame.quit()
-                sys.exit()
+                if fullscreen:
+                    fullscreen = False
+                    window = pygame.display.set_mode(windowed_size, pygame.RESIZABLE)
+                continue
             if game.phase == Phase.MENU:
                 if ui.menu_mode == "select_difficulty":
                     if k in (pygame.K_1, pygame.K_e):
@@ -167,4 +161,26 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        from pathlib import Path
+        error = traceback.format_exc()
+        crash_log = Path(__file__).resolve().parent / "crash.log"
+        try:
+            crash_log.write_text(error, encoding="utf-8")
+        except OSError:
+            pass
+        print(error, file=sys.stderr)
+        pygame.quit()
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("ZombieHood error", f"{error.splitlines()[-1]}\n\nDetails saved to:\n{crash_log}")
+            root.destroy()
+        except Exception:
+            pass
+        raise SystemExit(1)
