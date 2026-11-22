@@ -34,6 +34,7 @@ class Game:
         self.delay_ms = self.cfg.step_delay_ms
         self._timer = 0
         self.goal_delay_ms = 0
+        self.elapsed_ms = 0
 
     # --------------------------------------------------------- lifecycle
     def start_match(self, human_idx=None, seed=None, difficulty=None):
@@ -46,6 +47,7 @@ class Game:
         assert not validate_map(m, self.cfg)
         self.seed = m.seed
         self.state = GameState.from_map(self.cfg, m)
+        self.state.timed_match = True
         self.human_idx = human_idx
         self.agents = []
         for i, spec in enumerate(self.cfg.agents):
@@ -57,6 +59,7 @@ class Game:
         self.log, self.effects, self.outcome, self.flash = [], [], None, ""
         self._timer = 0
         self.goal_delay_ms = 0
+        self.elapsed_ms = 0
         self.phase = Phase.PLAYING
         diff_str = getattr(self.cfg, "difficulty", "hard").upper()
         self._say("👁️ 🕸️ Match started [%s %dx%d] - seed %d" % (diff_str, self.cfg.rows, self.cfg.cols, self.seed), (180, 220, 180))
@@ -104,6 +107,13 @@ class Game:
                 self._finish()
             return
         st = self.state
+        self.elapsed_ms += max(0, dt_ms)
+        if self.elapsed_ms >= self.cfg.match_time_limit_ms:
+            self.elapsed_ms = self.cfg.match_time_limit_ms
+            st.over, st.winner, st.reason = True, None, "timeout"
+            self._say("Time out! Nobody reached the goal within 2:30.", (255,210,63))
+            self._finish()
+            return
         if isinstance(self.agents[st.turn], HumanAgent):
             if self.agents[st.turn].pending is not None:
                 self.step()
@@ -180,7 +190,7 @@ class Game:
                 winner = st.survivors[e[1]]
                 loser = st.survivors[e[2]]
                 stolen = e[3]
-                self._say("⚔️ 🩸 %s defeated %s! (-1 HP, stole %d coins)" % (winner.name, loser.name, stolen), (255, 175, 75))
+                self._say("⚔️ %s stole %d coins from %s; %s lost 1 life!" % (winner.name, stolen, loser.name, loser.name), (255,175,75))
                 self._fx("float", pos=e[4], text="DEFEATED! -1 HP -%d coins" % stolen, color=(255, 80, 40))
             elif kind == "flee":
                 loser = st.survivors[e[1]]
@@ -190,13 +200,9 @@ class Game:
                 for zombie in st.zombies:
                     if zombie.alive and abs(zombie.pos[0]-e[3][0])+abs(zombie.pos[1]-e[3][1]) == 1:
                         self._fx("bite", src=zombie.pos, dst=e[3], color=(255,65,65), ttl=450)
-                lost = e[4] if len(e) > 4 else 0
-                if lost > 0:
-                    self._say("🧟 🩸 %s was bitten! Lost %d coins & 1 life!" % (s.name, lost), (255, 110, 110))
-                    self._fx("float", pos=e[3], text="-1 HP -%d coins" % lost, color=(255, 60, 60))
-                else:
-                    self._say("🧟 🩸 %s was bitten! (lives: %d)" % (s.name, s.lives), (255, 120, 120))
-                    self._fx("float", pos=e[3], text="-%d HP" % e[2], color=(255, 60, 60))
+                damage = e[2] * st.cfg.zombie_damage
+                self._say("🧟 🩸 %s was bitten! Lost %d life (lives: %d)" % (s.name, damage, s.lives), (255,120,120))
+                self._fx("float", pos=e[3], text="-%d HP" % damage, color=(255,60,60))
             elif kind == "death":
                 self._say("💀 ⚰️ %s has died" % s.name, (255, 105, 105))
             elif kind == "kill":
@@ -215,8 +221,10 @@ class Game:
         ranking = sorted(st.survivors, key=lambda s: (-s.score, -s.lives))
         w = st.survivors[st.winner] if st.winner is not None else None
         human = st.survivors[self.human_idx] if self.human_idx is not None else None
-        if st.reason == "all_dead":
-            if human is None and len(st.survivors) > 1 and ranking[0].score == ranking[1].score:
+        if st.reason == "timeout":
+            title, detail = "TIME OUT", "Nobody reached the goal within 2 minutes 30 seconds."
+        elif st.reason == "all_dead":
+            if not st.timed_match and human is None and len(st.survivors) > 1 and ranking[0].score == ranking[1].score:
                 title, detail = "GAME IS DRAW", "Game is Draw - Every survivor died with tied scores."
             else:
                 title, detail = "DEFEAT", "Every survivor died before reaching the goal."
@@ -239,7 +247,7 @@ class Game:
         else:
             title = "TIME UP"
             detail = "Round limit reached - %s leads with %d points." % (w.name if w else "Nobody", w.score if w else 0)
-        if human is not None:
+        if human is not None and st.reason != "timeout":
             if w is human:
                 title = "VICTORY"
                 detail = "You escaped through the goal with %d points!" % human.score

@@ -131,15 +131,25 @@ class Combat(unittest.TestCase):
         self.assertIsNotNone(act(st, 0, "ATTACK"))
         self.assertEqual(st.survivors[0].kills, 1)
 
-    def test_adjacent_zombie_loses_all_coins_and_life(self):
+    def test_adjacent_zombie_loses_life_but_keeps_coins_and_score(self):
         _, st = make_state(zombies=[(3, 3)], start_lives=2)
         st.survivors[0].pos = (3, 1)
         st.survivors[0].coins = 30
         st.survivors[0].score = 30
         act(st, 0, "RIGHT")                            # enters (3, 2), adjacent to (3,3)
         self.assertEqual(st.survivors[0].lives, 1)     # lost 1 life
-        self.assertEqual(st.survivors[0].coins, 0)     # lost all coins!
-        self.assertEqual(st.survivors[0].score, 0)
+        self.assertEqual(st.survivors[0].coins, 30)
+        self.assertEqual(st.survivors[0].score, 30)
+
+    def test_lethal_zombie_hit_preserves_coins_and_score(self):
+        _, st = make_state(zombies=[(3,3)], start_lives=1)
+        survivor = st.survivors[0]
+        survivor.pos = (3,1)
+        survivor.coins, survivor.score = 25, 45
+        events = act(st,0,"RIGHT")
+        self.assertFalse(survivor.alive)
+        self.assertEqual((survivor.coins,survivor.score),(25,45))
+        self.assertIn(("hit",0,1,(3,2),0),events)
 
     def test_attack_out_of_range_is_illegal(self):
         _, st = make_state(zombies=[(8, 8)])
@@ -294,7 +304,7 @@ class GameFlow(unittest.TestCase):
                 break
             g.update(10 ** 4)
         self.assertEqual(g.phase, Phase.OVER)
-        self.assertIn(g.outcome["title"], ("GAME OVER", "DEFEAT", "TIME UP", "GAME IS DRAW"))
+        self.assertIn(g.outcome["title"], ("GAME OVER", "DEFEAT", "TIME UP", "GAME IS DRAW", "TIME OUT"))
 
     def test_goal_delays_finish_for_four_seconds(self):
         g = Game(Config())
@@ -375,6 +385,24 @@ class AgentClash(unittest.TestCase):
         self.assertIn("clash", [e[0] for e in ev])
         self.assertIn("flee", [e[0] for e in ev])
 
+    def test_all_agent_pairs_transfer_coins_and_remove_one_life(self):
+        for attacker in range(3):
+            for defender in range(3):
+                if attacker == defender:
+                    continue
+                for human in (False, True):
+                    with self.subTest(attacker=attacker,defender=defender,human=human):
+                        _, st = make_state(start_lives=3)
+                        a,b = st.survivors[attacker],st.survivors[defender]
+                        a.pos,b.pos = (5,2),(5,3)
+                        a.coins,b.coins = 12,7
+                        a.human = human
+                        events = act(st,attacker,"RIGHT")
+                        self.assertIsNotNone(events)
+                        self.assertEqual((a.coins,b.coins),(19,0))
+                        self.assertEqual((a.lives,b.lives),(3,2))
+                        self.assertIn(("clash",attacker,defender,7,(5,3)),events)
+
     def test_blue_and_pink_border_cell_penalties(self):
         _, st = make_state(starts=((1, 1), (1, 3), (10, 10)))
         # (1, 1) is blue border cell (Tamal's start), (1, 3) is pink border cell (Progga's start)
@@ -421,16 +449,34 @@ class AgentClash(unittest.TestCase):
         # Survivor 2 cannot enter (3, 4) because it's a buried cell
         self.assertFalse(st.can_enter(st.survivors[2], (3, 4)))
 
-    def test_cannot_enter_opponent_cell_with_less_or_equal_coins(self):
-        _, st = make_state(starts=((3, 3), (3, 4), (10, 10)), start_lives=2)
-        st.survivors[0].coins = 5
-        st.survivors[1].coins = 10
-        self.assertFalse(st.can_enter(st.survivors[0], (3, 4)))
-        self.assertIsNone(act(st, 0, "RIGHT"))
-        # When coins are equal:
-        st.survivors[0].coins = 10
-        self.assertFalse(st.can_enter(st.survivors[0], (3, 4)))
-        self.assertIsNone(act(st, 0, "RIGHT"))
+    def test_poorer_initiator_loses_and_equal_coins_block(self):
+        for lives in (1, 2):
+            _, st = make_state(starts=((3,3),(3,4),(10,10)),start_lives=lives)
+            a,b = st.survivors[:2]
+            a.coins,b.coins = 5,10
+            events = act(st,0,"RIGHT")
+            self.assertIsNotNone(events)
+            self.assertEqual((a.coins,b.coins),(0,15))
+            self.assertEqual((a.lives,b.lives),(lives-1,lives))
+            self.assertEqual((a.pos,b.pos),((3,3),(3,4)))
+            self.assertIn(("clash",1,0,5,(3,3)),events)
+        _, st = make_state(starts=((3,3),(3,4),(10,10)),start_lives=2)
+        st.survivors[0].coins=st.survivors[1].coins=10
+        self.assertFalse(st.can_enter(st.survivors[0],(3,4)))
+        self.assertIsNone(act(st,0,"RIGHT"))
+        self.assertEqual([sv.coins for sv in st.survivors[:2]],[10,10])
+
+    def test_trapped_defender_retreats_to_vacated_source(self):
+        _, st = make_state(starts=((5,2),(5,3),(10,10)),
+                           obstacles=((4,3),(6,3),(5,4)),start_lives=2)
+        st.blue_cells=set();st.pink_cells=set()
+        a,b=st.survivors[:2]
+        a.coins,b.coins=10,5
+        events=act(st,0,"RIGHT")
+        self.assertEqual((a.pos,b.pos),((5,3),(5,2)))
+        self.assertEqual((a.coins,b.coins),(15,0))
+        self.assertEqual((a.lives,b.lives),(2,1))
+        self.assertIn(("flee",1,(5,2)),events)
 
 
 class DifficultyLevels(unittest.TestCase):
@@ -488,3 +534,41 @@ class DifficultyLevels(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MatchDeadlineTests(unittest.TestCase):
+    def test_human_waiting_times_out_without_draw_or_winner(self):
+        for human in (None, 0, 1, 2):
+            g = Game(make_config("easy", seed=42))
+            g.start_match(human)
+            g.update(150_000)
+            self.assertEqual(g.phase, Phase.OVER)
+            self.assertEqual(g.state.reason, "timeout")
+            self.assertEqual(g.outcome["title"], "TIME OUT")
+            self.assertIsNone(g.outcome["winner"])
+
+    def test_pause_excludes_time_and_restart_resets_deadline(self):
+        g = Game(make_config("easy", seed=42))
+        g.start_match(0)
+        g.update(1000)
+        g.toggle_pause()
+        g.update(150_000)
+        self.assertEqual(g.elapsed_ms, 1000)
+        g.toggle_pause()
+        g.update(148_999)
+        self.assertEqual(g.phase, Phase.PLAYING)
+        g.update(1)
+        self.assertEqual(g.outcome["title"], "TIME OUT")
+        g.restart()
+        self.assertEqual(g.elapsed_ms, 0)
+        self.assertEqual(g.phase, Phase.PLAYING)
+
+    def test_live_match_ignores_round_limit_and_unwinnable_draw(self):
+        g = Game(make_config("easy", seed=42))
+        g.start_match(0)
+        g.state.round = g.cfg.max_rounds
+        g.state.can_any_survivor_win = lambda: False
+        g.human_input("WAIT")
+        g.update(0)
+        self.assertFalse(g.state.over)
+        self.assertEqual(g.phase, Phase.PLAYING)

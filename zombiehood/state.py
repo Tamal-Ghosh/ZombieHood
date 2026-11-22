@@ -9,6 +9,9 @@ Rules in one place
   that survivor) cannot be entered.  Obstacles and living survivors block too.
 * Entering a coin cell collects it (score += value * multiplier).
 * Entering a heart cell gives +1 life (only if below the maximum).
+* Agent clashes compare both coin balances, regardless of who moves first.
+  The richer agent takes all loser coins; the loser loses exactly one life.
+  Equal coin balances block the move. Life is not transferred to the winner.
 * COMBAT: after a move, every living zombie orthogonally adjacent to the new
   cell hits the survivor once for ``zombie_damage``.  Attack / wait never
   trigger damage, and a zombie cannot hit twice in one action.
@@ -55,6 +58,7 @@ class GameState:
             self.pink_cells = set()
         else:
             self.pink_cells = {survivors[1].start} if len(survivors) > 1 else set()
+        self.timed_match = False  # Live games use an elapsed-time deadline instead of round/draw limits.
         self.turn = 0          # index of the survivor who acts next
         self.round = 0
         self.over = False
@@ -119,8 +123,8 @@ class GameState:
             return False
         for o in self.survivors:
             if o.alive and o.idx != s.idx and o.pos == pos:
-                # Can only clash and enter if s has strictly more coins than o
-                if s.coins <= o.coins:
+                # Unequal balances resolve a clash; equal balances block the move.
+                if s.coins == o.coins:
                     return False
         return True
 
@@ -134,7 +138,9 @@ class GameState:
                     and n not in self.zombie_cells and n not in self.buried_cells):
                 if n == self.goal and not self.goal_unlocked_for(survivor):
                     continue
-                if any(o.alive and o.idx != survivor.idx and o.pos == n for o in self.survivors):
+                # The attacking agent vacates from_pos on a winning move.
+                if any(o.alive and o.idx != survivor.idx and o.pos == n and o.pos != from_pos
+                       for o in self.survivors):
                     continue
                 safe = not self.is_adjacent_to_zombie(n)
                 opts.append((1 if safe else 0, -manhattan(n, from_pos), n))
@@ -244,6 +250,22 @@ class GameState:
 
             # Face-to-face clash: check if opponent occupies `new`
             opponent = next((o for o in self.survivors if o.alive and o.idx != s.idx and o.pos == new), None)
+            if opponent is not None and s.coins < opponent.coins:
+                # A poorer initiator loses too: defender stays put, initiator retreats
+                # to its current cell (or dies there), with no destination pickups.
+                stolen = s.coins
+                opponent.coins += stolen
+                opponent.score += stolen
+                s.coins = 0
+                s.lose_life(1)
+                ev.append(("clash", opponent.idx, idx, stolen, s.pos))
+                if s.alive:
+                    ev.append(("flee", idx, s.pos))
+                else:
+                    ev.append(("death", idx, s.pos))
+                    self.buried_cells.add(s.pos)
+                self._advance()
+                return ev
             if opponent is not None:
                 stolen = opponent.coins
                 s.coins += stolen
@@ -286,10 +308,8 @@ class GameState:
             adj = adjacent_alive(self.zombies, new)
             if adj:
                 s.lose_life(len(adj) * cfg.zombie_damage)
-                lost_coins = s.coins
-                s.score = max(0, s.score - lost_coins)
-                s.coins = 0
-                ev.append(("hit", idx, len(adj), new, lost_coins))
+                # Zombie attacks remove health only; coins and score are retained.
+                ev.append(("hit", idx, len(adj), new, 0))
                 if not s.alive:
                     ev.append(("death", idx, new))
                     self.buried_cells.add(new)
@@ -329,7 +349,7 @@ class GameState:
         if not any(s.alive for s in self.survivors):
             self.over, self.reason = True, "all_dead"
             return
-        if not self.can_any_survivor_win():
+        if not self.timed_match and not self.can_any_survivor_win():
             self.over, self.winner, self.reason = True, None, "draw"
             return
         n, i = len(self.survivors), self.turn
@@ -340,7 +360,7 @@ class GameState:
             if self.survivors[i].alive:
                 break
         self.turn = i
-        if self.round >= self.cfg.max_rounds:
+        if not self.timed_match and self.round >= self.cfg.max_rounds:
             alive = self.alive_survivors()
             if not alive:
                 self.over, self.winner, self.reason = True, None, "all_dead"
