@@ -13,7 +13,7 @@ AGENTS = (
      "color": (74, 163, 255), "female": False},
     {"name": "Progga", "algo": "fuzzy", "label": "Fuzzy Logic (FIS)",
      "color": (255, 123, 181), "female": True},
-    {"name": "Nijhum", "algo": "minimax", "label": "Minimax + Alpha-Beta",
+    {"name": "Nijhum", "algo": "astar", "label": "A* Search",
      "color": (255, 184, 74), "female": False},
 )
 

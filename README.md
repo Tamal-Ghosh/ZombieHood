@@ -6,7 +6,7 @@ A Python/Pygame zombie-survival board game with AI vs AI and AI vs Human modes.
 | --- | --- | --- |
 | Tamal | Monte Carlo Tree Search | Blue |
 | Progga | Fuzzy Logic | Pink |
-| Nijhum | Minimax with alpha-beta pruning | Orange |
+| Nijhum | A* Search | Orange |
 
 ## Run
 
