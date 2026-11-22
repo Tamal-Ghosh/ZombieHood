@@ -40,14 +40,14 @@ def main():
         if st.winner is not None:
             wins[st.survivors[st.winner].name] += 1
         for s in st.survivors:
-            totals[s.name][0] += s.score
+            totals[s.name][0] += s.coins
             totals[s.name][1] += think[s.idx]
             if not s.alive:
                 deaths[s.name] += 1
     print("matches:", n, "avg rounds: %.1f" % (rounds / n), dict(reasons))
     for sp in cfg.agents:
         nm = sp["name"]
-        print("%-7s %-24s wins=%2d deaths=%2d avg score=%5.1f think=%.3fs/match"
+        print("%-7s %-24s wins=%2d deaths=%2d avg coins=%5.1f think=%.3fs/match"
               % (nm, sp["label"], wins[nm], deaths[nm], totals[nm][0] / n,
                  totals[nm][1] / n))
 

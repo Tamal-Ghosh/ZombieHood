@@ -31,14 +31,14 @@ class MinimaxAgent(Agent):
         s = st.survivors[me]
         cfg = st.cfg
         if not s.alive:
-            return -3000 + s.score
+            return -3000 + s.coins
         if st.over and st.winner == me:
-            return 5000 + s.score
+            return 5000 + s.coins
         if st.over and st.winner is not None:
-            return -2500 + s.score
+            return -2500 + s.coins
         others = [o for o in st.survivors if o.idx != me]
-        v = s.score + 45 * s.lives + 12 * s.kills
-        v -= 0.35 * sum(o.score for o in others)
+        v = s.coins + 45 * s.lives + 12 * s.kills
+        v -= 0.35 * sum(o.coins for o in others)
 
         if st.goal_unlocked_for(s):
             v += 4000 - 40 * manhattan(s.pos, st.goal)
@@ -48,7 +48,7 @@ class MinimaxAgent(Agent):
 
         if st.coins:                       # pull toward valuable, close coins
             coin_weight = 3.5 if s.coins < cfg.coins_to_kill else 1.5
-            v += max(val * cfg.coin_multiplier * coin_weight / (manhattan(s.pos, c) + 1)
+            v += max(val * coin_weight / (manhattan(s.pos, c) + 1)
                      for c, val in st.coins.items())
         if st.hearts and s.lives < s.max_lives:
             v += 25.0 / (min(manhattan(s.pos, h) for h in st.hearts) + 1)

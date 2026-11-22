@@ -225,8 +225,8 @@ class MCTSAgent(Agent):
                         st.apply(cur, "WAIT")
 
         # Evaluate final state
-        r = s.score * 2.5 + 40 * s.lives + 60 * s.kills
-        r -= 0.3 * sum(o.score for o in st.survivors if o.idx != me)
+        r = s.coins * 2.5 + 40 * s.lives + 60 * s.kills
+        r -= 0.3 * sum(o.coins for o in st.survivors if o.idx != me)
         if st.winner == me:
             r += 1200
         elif st.winner is not None:

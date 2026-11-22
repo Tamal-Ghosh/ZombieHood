@@ -167,31 +167,30 @@ All AI agents receive a copied game state and return an action. The rules engine
 - Moving toward another living survivor can trigger a clash; see below.
 - Animation does not add extra game actions. Each cell transition displays one footstep, and the character faces its movement direction.
 
-### Coins, hearts and score
+### Coins and hearts
 
-| Event | Coin balance | Score | Health |
-| --- | --- | --- | --- |
-| Collect a coin worth `v` | `+v` | `+v × coin_multiplier` | No change |
-| Collect a heart below the health cap | No change | No change | `+1` life |
-| Kill a zombie | No coin deduction | `+20` by default | No change from the attack action |
-| Receive a zombie hit | **No coin loss** | **No score loss** | `−1` per adjacent zombie by default |
-| Win an agent clash | Receive all loser coins | Add the stolen coin amount | No life gain |
-| Lose an agent clash | Balance becomes `0` | Previously earned score is retained | `−1` life |
-| Enter a blue penalty cell | Lose up to `1` coin | Decrease by the actual coin loss | No change |
-| Enter a pink penalty cell | Lose up to `2` coins | Decrease by the actual coin loss | No change |
+| Event | Coins | Health |
+| --- | --- | --- |
+| Collect a coin worth `v` | +v | Unchanged |
+| Collect a heart below the health cap | Unchanged | +1 life |
+| Shoot a zombie | Unchanged | Unchanged |
+| Take a zombie hit | Unchanged | Lose one life per adjacent zombie by default |
+| Win an agent clash | Take the loser's coins | Unchanged |
+| Lose an agent clash | Balance becomes zero | Lose one life |
+| Enter a blue or pink penalty cell | Lose up to one or two coins respectively | Unchanged |
 
-Coin balance and score are separate values. Neither is allowed to become negative through tile penalties. A heart is consumed only when it can increase the survivor's life count.
+A heart is consumed only when it increases health.
 
 ### Zombie combat
 
 1. Moving onto a cell orthogonally adjacent to a living zombie causes damage.
 2. Each adjacent zombie hits once for that movement action. Two adjacent zombies therefore cost two lives with the default damage setting.
-3. Zombie attacks remove **health only**, including lethal attacks; carried coins and score are not stolen.
+3. Zombie attacks remove **health only**, including lethal attacks; carried coins are retained.
 4. Shooting and waiting do not trigger adjacency damage.
 5. To shoot, the survivor must have the preset's required coin balance and a zombie within Manhattan attack range.
 6. The nearest eligible zombie is killed, with zombie ID used to break equal-distance ties.
 7. The required coins are an eligibility threshold, **not ammunition spent per shot**.
-8. Killing a zombie opens its cell, adds one kill and awards the configured kill score.
+8. Killing a zombie opens its cell, adds one kill.
 
 A shot effect shows the agent attacking a zombie. Red attack lines show which adjacent zombies damaged an agent.
 
@@ -213,13 +212,13 @@ A winning mover can still encounter destination pickups, tile penalties or adjac
 ### Exit, victory and timeout
 
 - The exit unlocks **for each survivor individually** after the configured kill requirement: one zombie kill in all shipped presets.
-- Reaching the unlocked exit alive wins immediately, regardless of who has the highest score.
+- Reaching the unlocked exit alive wins immediately, regardless of who has the most coins.
 - The winner faces the camera at the exit. A four-second celebration precedes the result screen.
 - A live match has **150 seconds / 2 minutes 30 seconds of active play**.
 - Pausing freezes the countdown; waiting for human input does not.
-- If nobody reaches the goal before the deadline, the result is **TIME OUT**, with no winner, rather than a draw or a score-based victory.
+- If nobody reaches the goal before the deadline, the result is **TIME OUT**, with no winner, rather than a draw or a coin-based victory.
 - If everyone dies first, the live match ends in defeat.
-- Final standings summarize score and remaining lives; they do not replace the goal-based victory condition.
+- Final standings rank survivors by coins; they do not replace the goal-based victory condition.
 
 The headless simulator uses different stopping safeguards; see [Tests and headless simulation](#tests-and-headless-simulation).
 
@@ -257,7 +256,7 @@ Map generation is implemented in [`map.py`](zombiehood/map.py) and validated bef
 
 The board uses a fixed **isometric 2D projection**, not a movable 3D camera. Colored borders identify penalty cells; solid agent colors identify their occupied tiles. These visual markers have different meanings: an agent-colored occupied tile is not automatically a penalty tile.
 
-Sprites, pickups and raised objects are drawn back-to-front so objects behind characters remain behind them. Survivor cards show identity, life, score, kills, carried coins, rank and exit readiness. The event log explains pickups, damage, clashes and match outcomes.
+Sprites, pickups and raised objects are drawn back-to-front so objects behind characters remain behind them. Survivor cards show identity, life, kills, carried coins, rank and exit readiness. The event log explains pickups, damage, clashes and match outcomes.
 
 ## Audio
 
@@ -355,9 +354,9 @@ python zombiehood/simulate.py
 python zombiehood/simulate.py 5 10
 ```
 
-The simulator prints match counts, average rounds, termination reasons and each agent's wins, deaths, average score and thinking time. It uses the default `Config()` preset, which is Hard.
+The simulator prints match counts, average rounds, termination reasons and each agent's wins, deaths, average coin balance and thinking time. It uses the default `Config()` preset, which is Hard.
 
-**The simulator does not run the live 2:30 wall-clock countdown.** It creates `GameState` directly, retaining round-limit and unwinnable-state safeguards. Those simulated runs can finish with a draw or a score-based round-limit result. The interactive `Game` enables the active-play deadline and suppresses those early draw/round-limit endings.
+**The simulator does not run the live 2:30 wall-clock countdown.** It creates `GameState` directly, retaining round-limit and unwinnable-state safeguards. Those simulated runs can finish with a draw or a coin-based round-limit result. The interactive `Game` enables the active-play deadline and suppresses those early draw/round-limit endings.
 
 Search uses timing budgets, so batch results are measurements from that run, not a guarantee that one algorithm always wins. A repeated seed is primarily a layout-reproduction tool.
 
@@ -374,7 +373,7 @@ Edit [`zombiehood/config.py`](zombiehood/config.py):
 | `blue_cell_count`, `pink_cell_count` | Penalty-cell counts |
 | `start_lives`, `max_lives` | Starting health and health cap |
 | `coins_to_kill`, `attack_range` | Shot eligibility and range |
-| `zombie_damage`, `zombie_kill_score` | Zombie damage and kill reward |
+| `zombie_damage` | Zombie damage |
 | `kills_to_unlock` | Personal kill requirement for the exit |
 | `match_time_limit_ms` | Live active-play deadline; default `150_000` |
 | `step_delay_ms` | Default interval between AI actions |

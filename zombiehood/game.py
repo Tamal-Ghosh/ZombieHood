@@ -206,7 +206,7 @@ class Game:
             elif kind == "death":
                 self._say("💀 ⚰️ %s has died" % s.name, (255, 105, 105))
             elif kind == "kill":
-                self._say("💥 🎯 %s shot a zombie (+%d)" % (s.name, st.cfg.zombie_kill_score), (120, 255, 150))
+                self._say("💥 🎯 %s shot a zombie!" % s.name, (120, 255, 150))
                 self._fx("shot", src=s.pos, dst=e[3], color=col, ttl=350)
             elif kind == "unlock":
                 self._say("🗝️ 🔓 %s unlocked the goal!" % s.name, (120, 255, 150))
@@ -218,14 +218,14 @@ class Game:
         st = self.state
         self.phase = Phase.OVER
         self.goal_delay_ms = 0
-        ranking = sorted(st.survivors, key=lambda s: (-s.score, -s.lives))
+        ranking = sorted(st.survivors, key=lambda s: -s.coins)
         w = st.survivors[st.winner] if st.winner is not None else None
         human = st.survivors[self.human_idx] if self.human_idx is not None else None
         if st.reason == "timeout":
             title, detail = "TIME OUT", "Nobody reached the goal within 2 minutes 30 seconds."
         elif st.reason == "all_dead":
-            if not st.timed_match and human is None and len(st.survivors) > 1 and ranking[0].score == ranking[1].score:
-                title, detail = "GAME IS DRAW", "Game is Draw - Every survivor died with tied scores."
+            if not st.timed_match and human is None and len(st.survivors) > 1 and ranking[0].coins == ranking[1].coins:
+                title, detail = "GAME IS DRAW", "Game is Draw - Every survivor died with tied coin balances."
             else:
                 title, detail = "DEFEAT", "Every survivor died before reaching the goal."
         elif st.reason == "goal":
@@ -236,32 +236,32 @@ class Game:
                 title = "GAME IS DRAW"
                 detail = "Game is Draw - No way to win! Goal cannot be unlocked or reached."
             elif alive:
-                max_score = max(s.score for s in alive)
-                top = [s for s in alive if s.score == max_score]
+                max_coins = max(s.coins for s in alive)
+                top = [s for s in alive if s.coins == max_coins]
                 names = " & ".join(s.name for s in top)
                 title = "GAME IS DRAW"
-                detail = "Game is Draw - %s tied with %d points." % (names, max_score)
+                detail = "Game is Draw - %s tied with %d coins." % (names, max_coins)
             else:
                 title = "GAME IS DRAW"
                 detail = "Game is Draw - Match ended in a tie."
         else:
             title = "TIME UP"
-            detail = "Round limit reached - %s leads with %d points." % (w.name if w else "Nobody", w.score if w else 0)
+            detail = "Round limit reached - %s leads with %d coins." % (w.name if w else "Nobody", w.coins if w else 0)
         if human is not None and st.reason != "timeout":
             if w is human:
                 title = "VICTORY"
-                detail = "You escaped through the goal with %d points!" % human.score
+                detail = "You escaped through the goal with %d coins!" % human.coins
             elif st.reason == "draw":
                 alive = st.alive_survivors()
                 if alive and not st.can_any_survivor_win():
                     title = "GAME IS DRAW"
                     detail = "Game is Draw - No way to win! Goal cannot be unlocked or reached."
-                elif human in alive and human.score == max(s.score for s in alive):
+                elif human in alive and human.coins == max(s.coins for s in alive):
                     title = "GAME IS DRAW"
-                    detail = "Game is Draw - You tied for the lead with %d points!" % human.score
+                    detail = "Game is Draw - You tied for the lead with %d coins!" % human.coins
                 else:
                     title = "DEFEAT"
-                    detail = "Game is Draw between AIs - You lost with %d points." % human.score
+                    detail = "Game is Draw between AIs - You lost with %d coins." % human.coins
             elif not human.alive:
                 title, detail = "DEFEAT", "You died - %s" % detail
             else:

@@ -1,4 +1,4 @@
-"""Survivor state and small actions (lives, score)."""
+"""Survivor state and small actions (lives, coins)."""
 from dataclasses import dataclass
 
 
@@ -14,7 +14,6 @@ class Survivor:
     pos: tuple
     lives: int
     max_lives: int
-    score: int = 0
     coins: int = 0
     kills: int = 0
     alive: bool = True

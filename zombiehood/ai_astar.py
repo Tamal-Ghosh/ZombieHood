@@ -96,7 +96,7 @@ class AStarAgent(Agent):
                 return step_to_action(s.pos, path[0])
             return "ATTACK" if can_attack else greedy_action(state, idx, self.rng, 0)
 
-        if can_attack:                     # free 20 points + unlock progress
+        if can_attack:                     # advance toward unlocking the exit
             return "ATTACK"
 
         self.pos_history.append(s.pos)
@@ -112,7 +112,7 @@ class AStarAgent(Agent):
                 weight = 1.8 if s.coins < cfg.coins_to_kill else 1.0
                 if s.lives <= 1 and state.is_adjacent_to_zombie(cell):
                     weight *= 0.15
-                candidates.append(((v * cfg.coin_multiplier * weight + 2) / (cost + 1), path[0]))
+                candidates.append(((v * weight + 2) / (cost + 1), path[0]))
         if s.lives < s.max_lives:
             hv = 80 if s.lives <= 1 else 15
             for cell in state.hearts:
@@ -141,7 +141,7 @@ class AStarAgent(Agent):
                 if res:
                     path, cost = res
                     need = max(0, cfg.kills_to_unlock - s.kills)
-                    candidates.append((((cfg.zombie_kill_score + 10 * (need > 0)) + 15) / (cost + 1),
+                    candidates.append((((20 + 10 * (need > 0)) + 15) / (cost + 1),
                                        path[0]))
         if not candidates:
             return fallback_move(state, idx, self.rng, self.pos_history)

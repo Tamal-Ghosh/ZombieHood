@@ -110,13 +110,13 @@ class Combat(unittest.TestCase):
         act(st, 0, "ATTACK")
         self.assertEqual(st.survivors[0].lives, 3)
 
-    def test_attack_kills_nearest_and_scores_20(self):
+    def test_attack_kills_nearest_without_spending_coins(self):
         _, st = make_state(zombies=[(3, 5), (3, 3)], attack_range=2)
         st.survivors[0].pos = (3, 1)
         st.survivors[0].coins = 25                     # requires >= 25 coins
         act(st, 0, "ATTACK")
         self.assertEqual(st.survivors[0].kills, 1)
-        self.assertEqual(st.survivors[0].score, 20)
+        self.assertEqual(st.survivors[0].coins, 25)
         self.assertEqual(st.zombie_cells, {(3, 5)})
         self.assertFalse(st.zombies[1].alive)
 
@@ -131,24 +131,22 @@ class Combat(unittest.TestCase):
         self.assertIsNotNone(act(st, 0, "ATTACK"))
         self.assertEqual(st.survivors[0].kills, 1)
 
-    def test_adjacent_zombie_loses_life_but_keeps_coins_and_score(self):
+    def test_adjacent_zombie_loses_life_but_keeps_coins_(self):
         _, st = make_state(zombies=[(3, 3)], start_lives=2)
         st.survivors[0].pos = (3, 1)
         st.survivors[0].coins = 30
-        st.survivors[0].score = 30
         act(st, 0, "RIGHT")                            # enters (3, 2), adjacent to (3,3)
         self.assertEqual(st.survivors[0].lives, 1)     # lost 1 life
         self.assertEqual(st.survivors[0].coins, 30)
-        self.assertEqual(st.survivors[0].score, 30)
 
-    def test_lethal_zombie_hit_preserves_coins_and_score(self):
+    def test_lethal_zombie_hit_preserves_coins_(self):
         _, st = make_state(zombies=[(3,3)], start_lives=1)
         survivor = st.survivors[0]
         survivor.pos = (3,1)
-        survivor.coins, survivor.score = 25, 45
+        survivor.coins = 25
         events = act(st,0,"RIGHT")
         self.assertFalse(survivor.alive)
-        self.assertEqual((survivor.coins,survivor.score),(25,45))
+        self.assertEqual(survivor.coins,25)
         self.assertIn(("hit",0,1,(3,2),0),events)
 
     def test_attack_out_of_range_is_illegal(self):
@@ -170,10 +168,10 @@ class Combat(unittest.TestCase):
 
 class CoinsHeartsLives(unittest.TestCase):
     def test_coin_collection_and_reward(self):
-        _, st = make_state(coins={(0, 1): 12}, coin_multiplier=2)
+        _, st = make_state(coins={(0, 1): 12})
         act(st, 0, "RIGHT")
         s = st.survivors[0]
-        self.assertEqual((s.score, s.coins), (24, 12))
+        self.assertEqual(s.coins, 12)
         self.assertNotIn((0, 1), st.coins)
 
     def test_heart_adds_life_capped_at_max(self):
@@ -248,18 +246,18 @@ class GoalAndVictory(unittest.TestCase):
         self.assertFalse(st2.survivors[0].alive)       # bitten at the goal -> loses
         self.assertNotEqual(st2.winner, 0)
 
-    def test_time_up_picks_best_living_score(self):
+    def test_time_up_picks_highest_coin_balance(self):
         _, st = make_state(max_rounds=1)
-        st.survivors[1].score = 50
+        st.survivors[1].coins = 50
         for i in range(3):
             act(st, i, "WAIT")
         self.assertTrue(st.over)
         self.assertEqual((st.reason, st.winner), ("timeup", 1))
 
-    def test_time_up_tied_scores_results_in_draw(self):
+    def test_time_up_tied_coins_results_in_draw(self):
         _, st = make_state(max_rounds=1)
-        st.survivors[0].score = 30
-        st.survivors[1].score = 30
+        st.survivors[0].coins = 30
+        st.survivors[1].coins = 30
         for i in range(3):
             act(st, i, "WAIT")
         self.assertTrue(st.over)
@@ -368,10 +366,8 @@ class AgentClash(unittest.TestCase):
         _, st = make_state(starts=((0, 0), (10, 10), (11, 11)), start_lives=2)
         st.survivors[0].pos = (3, 3)
         st.survivors[0].coins = 10
-        st.survivors[0].score = 10
         st.survivors[1].pos = (3, 4)
         st.survivors[1].coins = 5
-        st.survivors[1].score = 5
         ev = act(st, 0, "RIGHT")                       # Survivor 0 moves onto (3, 4)
         self.assertIsNotNone(ev)
         # Survivor 0 wins and moves to (3, 4)
@@ -412,21 +408,17 @@ class AgentClash(unittest.TestCase):
         # Test blue border cell penalty: moving onto (1, 1) costs 1 coin
         st.survivors[0].pos = (1, 2)
         st.survivors[0].coins = 5
-        st.survivors[0].score = 5
         ev_blue = act(st, 0, "LEFT")                   # moves to (1, 1)
         self.assertEqual(st.survivors[0].pos, (1, 1))
         self.assertEqual(st.survivors[0].coins, 4)     # 5 - 1 = 4
-        self.assertEqual(st.survivors[0].score, 4)
         self.assertIn("penalty", [e[0] for e in ev_blue])
 
         # Test pink border cell penalty: moving onto (1, 3) costs 2 coins
         st.survivors[0].pos = (1, 2)
         st.survivors[0].coins = 5
-        st.survivors[0].score = 5
         ev_pink = act(st, 0, "RIGHT")                  # moves to (1, 3)
         self.assertEqual(st.survivors[0].pos, (1, 3))
         self.assertEqual(st.survivors[0].coins, 3)     # 5 - 2 = 3
-        self.assertEqual(st.survivors[0].score, 3)
         self.assertIn("penalty", [e[0] for e in ev_pink])
 
     def test_effects_live_messages_appear_for_two_seconds(self):

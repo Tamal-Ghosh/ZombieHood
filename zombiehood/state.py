@@ -7,7 +7,7 @@ Rules in one place
 * Actions: UP / DOWN / LEFT / RIGHT (no diagonals), ATTACK, WAIT.
 * Locked cells: a living zombie's cell and the goal (until unlocked for
   that survivor) cannot be entered.  Obstacles and living survivors block too.
-* Entering a coin cell collects it (score += value * multiplier).
+* Entering a coin cell collects it at face value.
 * Entering a heart cell gives +1 life (only if below the maximum).
 * Agent clashes compare both coin balances, regardless of who moves first.
   The richer agent takes all loser coins; the loser loses exactly one life.
@@ -16,11 +16,11 @@ Rules in one place
   cell hits the survivor once for ``zombie_damage``.  Attack / wait never
   trigger damage, and a zombie cannot hit twice in one action.
 * ATTACK kills the nearest living zombie within ``attack_range`` (Manhattan),
-  +20 score, +1 kill.
+  +1 kill.
 * The goal unlocks for a survivor at ``kills_to_unlock`` kills (or for all
   once no zombie is left alive, so a match can always finish).
 * Reaching the unlocked goal alive wins.  All dead -> defeat.  After
-  ``max_rounds`` the best living score wins (time up).
+  ``max_rounds`` the highest living coin balance wins (time up).
 """
 from collections import deque
 import random
@@ -255,7 +255,6 @@ class GameState:
                 # to its current cell (or dies there), with no destination pickups.
                 stolen = s.coins
                 opponent.coins += stolen
-                opponent.score += stolen
                 s.coins = 0
                 s.lose_life(1)
                 ev.append(("clash", opponent.idx, idx, stolen, s.pos))
@@ -269,7 +268,6 @@ class GameState:
             if opponent is not None:
                 stolen = opponent.coins
                 s.coins += stolen
-                s.score += stolen
                 opponent.coins = 0
                 opponent.lose_life(1)
                 ev.append(("clash", idx, opponent.idx, stolen, new))
@@ -286,8 +284,7 @@ class GameState:
             ev.append(("move", idx, new))
             value = self.coins.pop(new, None)
             if value is not None:
-                gain = value * cfg.coin_multiplier
-                s.score += gain
+                gain = value
                 s.coins += value
                 ev.append(("coin", idx, value, gain, new))
             if new in self.hearts and s.gain_life():
@@ -297,18 +294,16 @@ class GameState:
                 penalty = 1
                 lost = min(s.coins, penalty)
                 s.coins -= lost
-                s.score = max(0, s.score - lost)
                 ev.append(("penalty", idx, penalty, lost, new, "blue"))
             elif new in self.pink_cells:
                 penalty = 2
                 lost = min(s.coins, penalty)
                 s.coins -= lost
-                s.score = max(0, s.score - lost)
                 ev.append(("penalty", idx, penalty, lost, new, "pink"))
             adj = adjacent_alive(self.zombies, new)
             if adj:
                 s.lose_life(len(adj) * cfg.zombie_damage)
-                # Zombie attacks remove health only; coins and score are retained.
+                # Zombie attacks remove health only; coins are retained.
                 ev.append(("hit", idx, len(adj), new, 0))
                 if not s.alive:
                     ev.append(("death", idx, new))
@@ -329,7 +324,6 @@ class GameState:
             z.kill()
             self.zombie_cells.discard(z.pos)
             s.kills += 1
-            s.score += cfg.zombie_kill_score
             ev.append(("kill", idx, z.id, z.pos))
             if not was_open and self.goal_unlocked_for(s):
                 ev.append(("unlock", idx))
@@ -365,8 +359,8 @@ class GameState:
             if not alive:
                 self.over, self.winner, self.reason = True, None, "all_dead"
                 return
-            max_score = max(s.score for s in alive)
-            top = [s for s in alive if s.score == max_score]
+            max_coins = max(s.coins for s in alive)
+            top = [s for s in alive if s.coins == max_coins]
             if len(top) > 1:
                 self.over, self.winner, self.reason = True, None, "draw"
             else:

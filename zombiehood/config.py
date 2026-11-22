@@ -43,8 +43,6 @@ class Config:
     # --- combat / scoring -------------------------------------------
     attack_range: int = 2               # Manhattan distance of a shot
     zombie_damage: int = 1              # lives lost per adjacent zombie
-    zombie_kill_score: int = 20
-    coin_multiplier: int = 1            # reward = coin value * multiplier
     kills_to_unlock: int = 1            # kills needed to unlock the goal
     coins_to_kill: int = 20             # coins needed to kill a zombie
 
