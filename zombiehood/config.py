@@ -49,6 +49,7 @@ class Config:
     coins_to_kill: int = 20             # coins needed to kill a zombie
 
     # --- match flow --------------------------------------------------
+    match_time_limit_ms: int = 150_000   # 2 minutes 30 seconds of active play
     max_rounds: int = 250               # safety stop (time-up)
     step_delay_ms: int = 420            # pause between AI actions
 

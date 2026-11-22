@@ -1015,6 +1015,11 @@ class Renderer:
             mode = "AI Battle" if game.human_idx is None else "Control: %s" % st.survivors[game.human_idx].name
             self.text("R%d/%d | %s (%dx%d) | %s | %dms" % (st.round + 1, self.cfg.max_rounds, diff_label, self.cfg.rows, self.cfg.cols, mode, game.delay_ms),
                       15, DIM, (W - 16, 10), "topright", bold=False)
+            remaining = max(0,(self.cfg.match_time_limit_ms-game.elapsed_ms+999)//1000)
+            timer_box = pygame.Rect(W-470,38,220,48)
+            self.panel(timer_box,bg=PANEL_BG,border=PANEL_BORDER,width=2,radius=8)
+            self.text("TIME %02d:%02d" % divmod(remaining,60),26,
+                      RED if remaining <= 30 else GOLD,timer_box.center,"center")
 
     def draw_cards(self, game, t):
         ranked = sorted(game.state.survivors, key=lambda sv: (-sv.score, -sv.lives))
@@ -1149,7 +1154,7 @@ class Renderer:
             lines = [
                 ("3 DIFFICULTIES: EASY (10X10), MEDIUM (12X12), HARD (15X15)", GOLD),
                 ("GATHER REQUIRED COINS TO SHOOT ZOMBIES & UNLOCK GOAL", (255, 185, 80)),
-                ("ENTERING ADJACENT ZOMBIE CELL LOSES ALL COINS & 1 LIFE!", (255, 110, 110)),
+                ("EACH ADJACENT ZOMBIE COSTS 1 LIFE - COINS STAY SAFE!", (255, 110, 110)),
                 ("KILL AT LEAST 1 ZOMBIE TO UNLOCK THE EXIT GOAL!", GREEN),
             ]
             for i, (ln, col) in enumerate(lines):
@@ -1178,7 +1183,7 @@ class Renderer:
         o = game.outcome
         box_w, box_h = DIALOG_W, DIALOG_H
         box = pygame.Rect((W - box_w) // 2, (H - box_h) // 2, box_w, box_h)
-        col = RED if o["title"] == "DEFEAT" else (GOLD if "DRAW" in o["title"] else GREEN)
+        col = RED if o["title"] == "DEFEAT" else (GOLD if "DRAW" in o["title"] or o["title"] == "TIME OUT" else GREEN)
         self.panel(box, bg=PANEL_BG, border=col, width=3, radius=10)
 
         cx = box.centerx
@@ -1216,8 +1221,8 @@ class Renderer:
 
         # 2. Dynamic background elements from HTML
         self._draw_glowing_eyes(t)
-        self._draw_hanging_skull(90, 0, 120, 1.0, t)
-        self._draw_hanging_skull(W - 85, 0, 95, 0.8, t)
+        self._draw_hanging_skull(90, 0, 78, 1.0, t)
+        self._draw_hanging_skull(W - 85, 0, 78, 0.8, t)
         self._draw_marching_zombies(t)
 
         # 3. Game screens
